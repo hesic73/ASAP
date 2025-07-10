@@ -164,8 +164,8 @@ class Humanoid_Batch:
             "body_to_joint": body_to_joint
         }
 
-        
-    def fk_batch(self, pose, trans, convert_to_mat=True, return_full = False, dt=1/30):
+
+    def fk_batch(self, pose:torch.Tensor, trans:torch.Tensor, convert_to_mat:bool=True, return_full:bool = False, dt:float=1/30):
         device, dtype = pose.device, pose.dtype
         pose_input = pose.clone()
         B, seq_len = pose.shape[:2]
