@@ -4,6 +4,10 @@ defaults:
   - _self_
   - base/hydra
   - base/structure
+  - simulator: isaacgym
+  - domain_rand: NO_domain_rand
+  - robot: g1/g1_29dof_anneal_23dof
+  - terrain: terrain_locomotion_plane 
 
 # These are global variables that all levels of the config can access.
 ## Experiment setup
@@ -17,7 +21,7 @@ auto_load_latest: False
 checkpoint: null
 
 ### Naming and dir structure
-project_name: TEST
+project_name: MotionTracking
 experiment_name: TEST
 
 base_dir: logs
@@ -27,8 +31,12 @@ save_dir: ${experiment_dir}/.hydra
 
 force_flat_terrain: False
 
-use_wandb: False
+use_wandb: True
 log_task_name: TEST
+
+wandb:
+  wandb_dir: wandb
+  wandb_entity: null
 
 ### Simulation
 sim_type: isaacgym

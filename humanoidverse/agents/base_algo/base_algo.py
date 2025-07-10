@@ -36,7 +36,7 @@ class BaseAlgo:
         return obs_dict, rewards, dones, extras
 
     @torch.no_grad()
-    def evaluate_policy(self):
+    def evaluate_policy(self, max_steps: Optional[int] = None):
         return NotImplementedError
 
     def save(self, path=None, name="last.ckpt"):

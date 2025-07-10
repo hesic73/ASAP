@@ -81,7 +81,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                 self.motions_for_saving = {'root_trans_offset':[], 'pose_aa':[], 'dof':[], 'root_rot':[], 'actor_obs':[], 'action':[], 'terminate':[],
                                             'root_lin_vel':[], 'root_ang_vel':[], 'dof_vel':[]}
                 self.motion_times_buf = []
-                self.start_save = False
 
         else:
             self.save_motion = False
@@ -539,8 +538,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             
             self.motion_times_buf.append(motion_times.cpu())
 
-            self.start_save = True
-
     # ############################################################
         
     def _get_obs_dif_local_rigid_body_pos(self):
@@ -557,7 +554,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         return self._obs_vr_3point_pos
 
     ######################### Observations #########################
-    def _get_obs_history_actor(self,):
+    def _get_obs_history_actor(self) -> torch.Tensor:
         assert "history_actor" in self.config.obs.obs_auxiliary.keys()
         history_config = self.config.obs.obs_auxiliary['history_actor']
         history_key_list = history_config.keys()
@@ -568,8 +565,8 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             history_tensor = history_tensor.reshape(history_tensor.shape[0], -1)  # Shape: [4096, history_length*obs_dim]
             history_tensors.append(history_tensor)
         return torch.cat(history_tensors, dim=1)
-    
-    def _get_obs_history_critic(self,):
+
+    def _get_obs_history_critic(self) -> torch.Tensor:
         assert "history_critic" in self.config.obs.obs_auxiliary.keys()
         history_config = self.config.obs.obs_auxiliary['history_critic']
         history_key_list = history_config.keys()
@@ -582,9 +579,9 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         return torch.cat(history_tensors, dim=1)
     ###############################################################
 
-    def _reward_teleop_body_position_extend(self):
-        upper_body_diff = self.dif_global_body_pos[:, self.upper_body_id, :]
-        lower_body_diff = self.dif_global_body_pos[:, self.lower_body_id, :]
+    def _reward_teleop_body_position_extend(self) -> torch.Tensor:
+        upper_body_diff = self.dif_global_body_pos[:, self.upper_body_id, :] # (num_envs, num_upper_body_joints, 3)
+        lower_body_diff = self.dif_global_body_pos[:, self.lower_body_id, :] # (num_envs, num_lower_body_joints, 3)
 
         diff_body_pos_dist_upper = (upper_body_diff**2).mean(dim=-1).mean(dim=-1)
         diff_body_pos_dist_lower = (lower_body_diff**2).mean(dim=-1).mean(dim=-1)

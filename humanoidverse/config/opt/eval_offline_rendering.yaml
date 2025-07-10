@@ -1,0 +1,15 @@
+# @package _global_
+
+algo:
+  config:
+    eval_callbacks:
+      offline_rendering:
+        _target_: humanoidverse.agents.callbacks.offline_rendering.OfflineRenderingCallback
+        config:
+          video_width: 1080
+          video_height: 1920
+          video_filename: "${eval_log_dir}/eval.mp4" # configurable video filename
+          camera_offset: [0.8, -0.8, 0.3] # configurable camera offset (x, y, z)
+          camera_rotation_axis: [0.0, 0.0, 1.0] # configurable camera rotation axis
+          camera_rotation_angle_deg: 135 # configurable camera rotation angle in degrees
+          camera_follow_mode: "FOLLOW_POSITION" # configurable camera follow mode ("FOLLOW_POSITION" or "FOLLOW_TRANSFORM")

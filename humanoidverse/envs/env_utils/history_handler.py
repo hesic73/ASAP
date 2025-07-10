@@ -1,17 +1,19 @@
 import torch
-from torch import Tensor
 from termcolor import colored
 from loguru import logger
 
+from omegaconf import DictConfig
+from typing import Dict, Any
+
 class HistoryHandler:
-    
-    def __init__(self, num_envs, history_config, obs_dims, device):
+
+    def __init__(self, num_envs:int, history_config:DictConfig, obs_dims:Dict[str,int], device:torch.device):
         self.obs_dims = obs_dims
         self.device = device
         self.num_envs = num_envs
-        self.history = {}
+        self.history:Dict[str, torch.Tensor] = {}
 
-        self.buffer_config = {}
+        self.buffer_config:Dict[str, int] = {}
         for aux_key, aux_config in history_config.items():
             for obs_key, obs_num in aux_config.items():
                 if obs_key in self.buffer_config:
@@ -26,19 +28,19 @@ class HistoryHandler:
         for key, value in self.buffer_config.items():
             logger.info(f"Key: {key}, Value: {value}")
 
-    def reset(self, reset_ids):
+    def reset(self, reset_ids:torch.Tensor):
         if len(reset_ids)==0:
             return
         assert set(self.buffer_config.keys()) == set(self.history.keys()), f"History keys mismatch\n{self.buffer_config.keys()}\n{self.history.keys()}"
         for key in self.history.keys():
             self.history[key][reset_ids] *= 0.
 
-    def add(self, key: str, value: Tensor):
+    def add(self, key: str, value: torch.Tensor):
         assert key in self.history.keys(), f"Key {key} not found in history"
         val = self.history[key].clone()
         self.history[key][:, 1:] = val[:, :-1]
         self.history[key][:, 0] = value.clone()
-        
-    def query(self, key: str):
+
+    def query(self, key: str) -> torch.Tensor:
         assert key in self.history.keys(), f"Key {key} not found in history"
         return self.history[key].clone()

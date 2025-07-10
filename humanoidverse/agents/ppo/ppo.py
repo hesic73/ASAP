@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from typing import Optional, List, Dict
+from itertools import count
+
 from humanoidverse.agents.modules.ppo_modules import PPOActor, PPOCritic
 from humanoidverse.agents.modules.data_utils import RolloutStorage
 from humanoidverse.envs.base_task.base_task import BaseTask
@@ -580,22 +583,27 @@ class PPO(BaseAlgo):
         return obs_dict
 
     @torch.no_grad()
-    def evaluate_policy(self):
+    def evaluate_policy(self, max_steps: Optional[int] = None):
         self._create_eval_callbacks()
         self._pre_evaluate_policy()
         actor_state = self._create_actor_state()
-        step = 0
         self.eval_policy = self._get_inference_policy()
         obs_dict = self.env.reset_all()
         init_actions = torch.zeros(self.env.num_envs, self.num_act, device=self.device)
         actor_state.update({"obs": obs_dict, "actions": init_actions})
         actor_state = self._pre_eval_env_step(actor_state)
-        while True:
+
+        if max_steps is None:
+            it= count(0)
+        else:
+            from tqdm import trange
+            it = trange(max_steps)
+
+        for step in it:
             actor_state["step"] = step
             actor_state = self._pre_eval_env_step(actor_state)
             actor_state = self.env_step(actor_state)
             actor_state = self._post_eval_env_step(actor_state)
-            step += 1
         self._post_evaluate_policy()
 
     def _create_actor_state(self):

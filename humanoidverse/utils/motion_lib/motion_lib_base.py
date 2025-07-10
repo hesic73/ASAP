@@ -36,14 +36,14 @@ class MotionlibMode(Enum):
     directory = 2
 
 
-def to_torch(tensor):
+def to_torch(tensor) -> torch.Tensor:
     if torch.is_tensor(tensor):
         return tensor
     else:
         return torch.from_numpy(tensor)
 
 class MotionLibBase():
-    def __init__(self, motion_lib_cfg, num_envs, device):
+    def __init__(self, motion_lib_cfg, num_envs:int, device):
         self.m_cfg = motion_lib_cfg
         self._sim_fps = 1/self.m_cfg.get("step_dt", 1/50)
         
@@ -60,8 +60,8 @@ class MotionLibBase():
         if flags.real_traj:
             self.track_idx = self._motion_data_load[next(iter(self._motion_data_load))].get("track_idx", [19, 24, 29])
         return
-        
-    def load_data(self, motion_file, min_length=-1, im_eval = False):
+
+    def load_data(self, motion_file:str, min_length:int=-1, im_eval:bool=False):
         if osp.isfile(motion_file):
             self.mode = MotionlibMode.file
             self._motion_data_load = joblib.load(motion_file)
