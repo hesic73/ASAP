@@ -42,13 +42,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
 
         self._init_save_motion()
 
-        if self.config.use_teleop_control:
-            self.teleop_marker_coords = torch.zeros(self.num_envs, 3, 3, dtype=torch.float, device=self.device, requires_grad=False)
-            import rclpy
-            from rclpy.node import Node
-            from std_msgs.msg import Float64MultiArray
-            self.node = Node("motion_tracking")
-            self.teleop_sub = self.node.create_subscription(Float64MultiArray, "vision_pro_data", self.teleop_callback, 1)
+        assert not self.config.get("use_teleop_control", False)
 
         if self.config.termination.terminate_when_motion_far and self.config.termination_curriculum.terminate_when_motion_far_curriculum:
             self.terminate_when_motion_far_threshold = self.config.termination_curriculum.terminate_when_motion_far_initial_threshold
@@ -58,12 +52,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             self.terminate_when_motion_far_threshold = self.config.termination_scales.termination_motion_far_threshold
             logger.info(f"Terminate when motion far threshold: {self.terminate_when_motion_far_threshold}")
 
-
-
-        
-
-    def teleop_callback(self, msg):
-        self.teleop_marker_coords = torch.tensor(msg.data, device=self.device)
 
     def _init_save_motion(self):
         if "save_motion" in self.config:
@@ -326,10 +314,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         self._obs_local_ref_rigid_body_vel = local_ref_rigid_body_vel_flat.view(env_batch_size, -1) # (num_envs, num_rigid_bodies*3)
 
         ######################VR 3 point ########################
-        if not self.config.use_teleop_control:
-            ref_vr_3point_pos = ref_body_pos_extend.view(env_batch_size, -1, 3)[:, self.motion_tracking_id, :]
-        else:
-            ref_vr_3point_pos = self.teleop_marker_coords
+        ref_vr_3point_pos = ref_body_pos_extend.view(env_batch_size, -1, 3)[:, self.motion_tracking_id, :]
         vr_2root_pos = (ref_vr_3point_pos - self.simulator.robot_root_states[:, 0:3].view(env_batch_size, 1, 3))
         heading_inv_rot_vr = heading_inv_rot.repeat(3,1)
         self._obs_vr_3point_pos = my_quat_rotate(heading_inv_rot_vr.view(-1, 4), vr_2root_pos.view(-1, 3)).view(env_batch_size, -1)
@@ -373,23 +358,16 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         self._refresh_sim_tensors()
 
         for env_id in range(self.num_envs):
-            if not self.config.use_teleop_control:
-                # draw marker joints
-                for pos_id, pos_joint in enumerate(self.marker_coords[env_id]): # idx 0 torso (duplicate with 11)
-                    if self.config.robot.motion.visualization.customize_color:
-                        color_inner = self.config.robot.motion.visualization.marker_joint_colors[pos_id % len(self.config.robot.motion.visualization.marker_joint_colors)]
-                    else:
-                        color_inner = (0.3, 0.3, 0.3)
-                    color_inner = tuple(color_inner)
+            for pos_id, pos_joint in enumerate(self.marker_coords[env_id]): # idx 0 torso (duplicate with 11)
+                if self.config.robot.motion.visualization.customize_color:
+                    color_inner = self.config.robot.motion.visualization.marker_joint_colors[pos_id % len(self.config.robot.motion.visualization.marker_joint_colors)]
+                else:
+                    color_inner = (0.3, 0.3, 0.3)
+                color_inner = tuple(color_inner)
 
-                    # import ipdb; ipdb.set_trace()
-                    self.simulator.draw_sphere(pos_joint, 0.04, color_inner, env_id, pos_id)
+                # import ipdb; ipdb.set_trace()
+                self.simulator.draw_sphere(pos_joint, 0.04, color_inner, env_id, pos_id)
 
-
-            else:
-                # draw teleop joints
-                for pos_id, pos_joint in enumerate(self.teleop_marker_coords[env_id]):
-                    self.simulator.draw_sphere(pos_joint, 0.04, (0.851, 0.144, 0.07), env_id, pos_id)
 
     def _reset_root_states(self, env_ids):
         # reset root states according to the reference motion

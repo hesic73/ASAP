@@ -58,6 +58,7 @@ AMASS/*
 
 *.sh
 *.txt
+*.stl
 
 eval_g129dof_checkpoints
 _isaac_sim

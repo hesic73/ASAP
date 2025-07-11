@@ -210,12 +210,6 @@ class MotionLibBase():
             "root_vel": body_vel[..., 0, :].clone(),
             "root_ang_vel": body_ang_vel[..., 0, :].clone(),
             "dof_vel": dof_vel.view(dof_vel.shape[0], -1),
-            "motion_aa": self._motion_aa[f0l],
-            "motion_bodies": self._motion_bodies[motion_ids],
-            "rg_pos": rg_pos,
-            "rb_rot": rb_rot,
-            "body_vel": body_vel,
-            "body_ang_vel": body_ang_vel,
             "rg_pos_t": rg_pos_t,
             "rg_rot_t": rg_rot_t,
             "body_vel_t": body_vel_t,
@@ -235,9 +229,6 @@ class MotionLibBase():
         _motion_fps = []
         _motion_dt = []
         _motion_num_frames = []
-        _motion_bodies = []
-        _motion_aa = []
-        has_action = False
         _motion_actions = []
 
         if flags.real_traj:
@@ -265,19 +256,11 @@ class MotionLibBase():
         motion_data_list = self._motion_data_list[sample_idxes.cpu().numpy()]
         res_acc = self.load_motion_with_skeleton(
             motion_data_list, max_len)
-        for motion_file_data, curr_motion in track(res_acc, description="Loading motions..."):
+        for _, curr_motion in track(res_acc, description="Loading motions..."):
             motion_fps = curr_motion.fps
             curr_dt = 1.0 / motion_fps
             num_frames = curr_motion.global_rotation.shape[0]
             curr_len = 1.0 / motion_fps * (num_frames - 1)
-
-            if "beta" in motion_file_data:
-                _motion_aa.append(
-                    motion_file_data['pose_aa'].reshape(-1, self.num_joints * 3))
-                _motion_bodies.append(curr_motion.gender_beta)
-            else:
-                _motion_aa.append(np.zeros((num_frames, self.num_joints * 3)))
-                _motion_bodies.append(torch.zeros(17))
 
             _motion_fps.append(motion_fps)
             _motion_dt.append(curr_dt)
@@ -300,10 +283,6 @@ class MotionLibBase():
             _motion_lengths, device=self._device, dtype=torch.float32)
         self._motion_fps = torch.tensor(
             _motion_fps, device=self._device, dtype=torch.float32)
-        self._motion_bodies = torch.stack(_motion_bodies).to(
-            self._device).type(torch.float32)
-        self._motion_aa = torch.tensor(np.concatenate(
-            _motion_aa), device=self._device, dtype=torch.float32)
 
         self._motion_dt = torch.tensor(
             _motion_dt, device=self._device, dtype=torch.float32)
@@ -315,30 +294,45 @@ class MotionLibBase():
                 _motion_actions, dim=0).float().to(self._device)
         self._num_motions = len(motions)
 
+        # (*, 24, 3)
         self.gts = torch.cat(
             [m.global_translation for m in motions], dim=0).float().to(self._device)
+        # (*, 24, 4)
         self.grs = torch.cat(
             [m.global_rotation for m in motions], dim=0).float().to(self._device)
+        # (*, 27, 4)
         self.lrs = torch.cat(
             [m.local_rotation for m in motions], dim=0).float().to(self._device)
+        # (*, 3)
         self.grvs = torch.cat(
             [m.global_root_velocity for m in motions], dim=0).float().to(self._device)
+        # (*, 3)
         self.gravs = torch.cat(
             [m.global_root_angular_velocity for m in motions], dim=0).float().to(self._device)
+        # (*, 24, 3)
         self.gavs = torch.cat(
             [m.global_angular_velocity for m in motions], dim=0).float().to(self._device)
+        # (*, 24, 3)
         self.gvs = torch.cat(
             [m.global_velocity for m in motions], dim=0).float().to(self._device)
+        # (*, 23)
         self.dvs = torch.cat([m.dof_vels for m in motions],
                              dim=0).float().to(self._device)
+        
+
+        # NOTE (hsc): 24和27，差的三个就是extend body
 
         assert "global_translation_extend" in motions[0].__dict__
+        # (*, 27, 3)
         self.gts_t = torch.cat(
             [m.global_translation_extend for m in motions], dim=0).float().to(self._device)
+        # (*, 27, 4)
         self.grs_t = torch.cat(
             [m.global_rotation_extend for m in motions], dim=0).float().to(self._device)
+        # (*, 27, 3)
         self.gvs_t = torch.cat(
             [m.global_velocity_extend for m in motions], dim=0).float().to(self._device)
+        # (*, 27, 3)
         self.gavs_t = torch.cat(
             [m.global_angular_velocity_extend for m in motions], dim=0).float().to(self._device)
 
@@ -359,14 +353,12 @@ class MotionLibBase():
         self.length_starts = lengths_shifted.cumsum(0)
         self.motion_ids = torch.arange(
             len(motions), dtype=torch.long, device=self._device)
-        motion = motions[0]
         self.num_bodies = self.num_joints
 
         num_motions = self._num_motions
         total_len = self.get_total_length()
         logger.info(
             f"Loaded {num_motions:d} motions with a total length of {total_len:.3f}s and {self.gts.shape[0]} frames.")
-        return motions
 
     def load_motion_with_skeleton(self,
                                   motion_data_list: List[Union[str, Dict[str, Any]]],
