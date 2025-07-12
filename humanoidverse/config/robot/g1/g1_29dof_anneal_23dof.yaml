@@ -233,26 +233,27 @@ robot:
     left_foot_name: 'l_foot_roll'
 
 
-    nums_extend_bodies: 3
-    extend_config:
-      - joint_name: "left_hand_link"
-        parent_name: "left_elbow_link"
-        pos: [0.25, 0.0, 0.0]
-        rot: [1.0, 0.0, 0.0, 0.0] # w x y z
-      - joint_name: "right_hand_link"
-        parent_name: "right_elbow_link"
-        pos: [0.25, 0.0, 0.0]
-        rot: [1.0, 0.0, 0.0, 0.0] # w x y z
-      - joint_name: "head_link"
-        parent_name: "torso_link"
-        pos: [0.0, 0.0, 0.42]
-        rot: [1.0, 0.0, 0.0, 0.0] # w x y z
+    nums_extend_bodies: 0 # 3
+
+    # extend_config:
+    #   - joint_name: "left_hand_link"
+    #     parent_name: "left_elbow_link"
+    #     pos: [0.25, 0.0, 0.0]
+    #     rot: [1.0, 0.0, 0.0, 0.0] # w x y z
+    #   - joint_name: "right_hand_link"
+    #     parent_name: "right_elbow_link"
+    #     pos: [0.25, 0.0, 0.0]
+    #     rot: [1.0, 0.0, 0.0, 0.0] # w x y z
+    #   - joint_name: "head_link"
+    #     parent_name: "torso_link"
+    #     pos: [0.0, 0.0, 0.42]
+    #     rot: [1.0, 0.0, 0.0, 0.0] # w x y z
 
 
-    motion_tracking_link:
-      - "left_hand_link"
-      - "right_hand_link"
-      - "head_link"
+    # motion_tracking_link:
+    #   - "left_hand_link"
+    #   - "right_hand_link"
+    #   - "head_link"
 
     lower_body_link:
       - "pelvis"
@@ -281,9 +282,9 @@ robot:
       - "right_shoulder_roll_link"
       - "right_shoulder_yaw_link"
       - "right_elbow_link"
-      - "left_hand_link"
-      - "right_hand_link"
-      - "head_link"
+      # - "left_hand_link"
+      # - "right_hand_link"
+      # - "head_link"
 
 
     pelvis_link: "pelvis"
@@ -306,11 +307,11 @@ robot:
       - ["right_ankle_roll_link", "R_Ankle"]
       - ["left_shoulder_roll_link", "L_Shoulder"]
       - ["left_elbow_link", "L_Elbow"]
-      - ["left_hand_link", "L_Hand"]
+      # - ["left_hand_link", "L_Hand"]
       - ["right_shoulder_roll_link", "R_Shoulder"]
       - ["right_elbow_link", "R_Elbow"]
-      - ["right_hand_link", "R_Hand"]
-      - ["head_link", "Head"]
+      # - ["right_hand_link", "R_Hand"]
+      # - ["head_link", "Head"]
 
 
     smpl_pose_modifier:

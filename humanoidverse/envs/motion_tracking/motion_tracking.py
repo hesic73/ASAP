@@ -98,30 +98,32 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             self.resample_time_interval = np.ceil(self.config.resample_time_interval_s / self.dt)
         
     def _init_motion_extend(self):
-        if "extend_config" in self.config.robot.motion:
-            extend_parent_ids, extend_pos, extend_rot = [], [], []
-            for extend_config in self.config.robot.motion.extend_config:
-                extend_parent_ids.append(self.simulator._body_list.index(extend_config["parent_name"]))
-                # extend_parent_ids.append(self.simulator.find_rigid_body_indice(extend_config["parent_name"]))
-                extend_pos.append(extend_config["pos"])
-                extend_rot.append(extend_config["rot"])
-                self.simulator._body_list.append(extend_config["joint_name"])
+        extend_parent_ids, extend_pos, extend_rot = [], [], []
+        for extend_config in self.config.robot.motion.get("extend_config", []):
+            extend_parent_ids.append(self.simulator._body_list.index(extend_config["parent_name"]))
+            # extend_parent_ids.append(self.simulator.find_rigid_body_indice(extend_config["parent_name"]))
+            extend_pos.append(extend_config["pos"])
+            extend_rot.append(extend_config["rot"])
+            self.simulator._body_list.append(extend_config["joint_name"])
 
-            self.extend_body_parent_ids = torch.tensor(extend_parent_ids, device=self.device, dtype=torch.long)
-            self.extend_body_pos_in_parent = torch.tensor(extend_pos).repeat(self.num_envs, 1, 1).to(self.device)
-            self.extend_body_rot_in_parent_wxyz = torch.tensor(extend_rot).repeat(self.num_envs, 1, 1).to(self.device)
+        self.extend_body_parent_ids = torch.tensor(extend_parent_ids, device=self.device, dtype=torch.long)
+        self.extend_body_pos_in_parent = torch.tensor(extend_pos).repeat(self.num_envs, 1, 1).to(self.device)
+        self.extend_body_rot_in_parent_wxyz = torch.tensor(extend_rot).repeat(self.num_envs, 1, 1).to(self.device) # (num_envs, num_extend_bodies, 4)
+        if extend_parent_ids:
             self.extend_body_rot_in_parent_xyzw = self.extend_body_rot_in_parent_wxyz[:, :, [1, 2, 3, 0]]
-            self.num_extend_bodies = len(extend_parent_ids)
+        else:
+            self.extend_body_rot_in_parent_xyzw = torch.zeros(self.num_envs, 0, 4, device=self.device, dtype=torch.float)
+        self.num_extend_bodies = len(extend_parent_ids)
 
-            self.marker_coords = torch.zeros(self.num_envs, 
-                                         self.num_bodies + self.num_extend_bodies, 
-                                         3, 
-                                         dtype=torch.float, 
-                                         device=self.device, 
-                                         requires_grad=False) # extend
-            
-            self.ref_body_pos_extend = torch.zeros(self.num_envs, self.num_bodies + self.num_extend_bodies, 3, dtype=torch.float, device=self.device, requires_grad=False)
-            self.dif_global_body_pos = torch.zeros(self.num_envs, self.num_bodies + self.num_extend_bodies, 3, dtype=torch.float, device=self.device, requires_grad=False)
+        self.marker_coords = torch.zeros(self.num_envs, 
+                                        self.num_bodies + self.num_extend_bodies, 
+                                        3, 
+                                        dtype=torch.float, 
+                                        device=self.device, 
+                                        requires_grad=False) # extend
+        
+        self.ref_body_pos_extend = torch.zeros(self.num_envs, self.num_bodies + self.num_extend_bodies, 3, dtype=torch.float, device=self.device, requires_grad=False)
+        self.dif_global_body_pos = torch.zeros(self.num_envs, self.num_bodies + self.num_extend_bodies, 3, dtype=torch.float, device=self.device, requires_grad=False)
 
     def start_compute_metrics(self):
         self.compute_metrics = True
@@ -314,10 +316,13 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         self._obs_local_ref_rigid_body_vel = local_ref_rigid_body_vel_flat.view(env_batch_size, -1) # (num_envs, num_rigid_bodies*3)
 
         ######################VR 3 point ########################
-        ref_vr_3point_pos = ref_body_pos_extend.view(env_batch_size, -1, 3)[:, self.motion_tracking_id, :]
-        vr_2root_pos = (ref_vr_3point_pos - self.simulator.robot_root_states[:, 0:3].view(env_batch_size, 1, 3))
-        heading_inv_rot_vr = heading_inv_rot.repeat(3,1)
-        self._obs_vr_3point_pos = my_quat_rotate(heading_inv_rot_vr.view(-1, 4), vr_2root_pos.view(-1, 3)).view(env_batch_size, -1)
+        if "motion_tracking_link" in self.config.robot.motion:
+            ref_vr_3point_pos = ref_body_pos_extend.view(env_batch_size, -1, 3)[:, self.motion_tracking_id, :]
+            vr_2root_pos = (ref_vr_3point_pos - self.simulator.robot_root_states[:, 0:3].view(env_batch_size, 1, 3))
+            heading_inv_rot_vr = heading_inv_rot.repeat(3,1)
+            self._obs_vr_3point_pos = my_quat_rotate(heading_inv_rot_vr.view(-1, 4), vr_2root_pos.view(-1, 3)).view(env_batch_size, -1)
+        else:
+            self._obs_vr_3point_pos = torch.zeros(env_batch_size, 0, device=self.device, dtype=torch.float)
         #################### Deepmimic phase ###################### 
 
         self._ref_motion_length = self._motion_lib.get_motion_length(self.motion_ids)
@@ -339,19 +344,21 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
     def _log_motion_tracking_info(self):
         upper_body_diff = self.dif_global_body_pos[:, self.upper_body_id, :]
         lower_body_diff = self.dif_global_body_pos[:, self.lower_body_id, :]
-        vr_3point_diff = self.dif_global_body_pos[:, self.motion_tracking_id, :]
+        
         joint_pos_diff = self.dif_joint_angles
 
         upper_body_diff_norm = upper_body_diff.norm(dim=-1).mean()
         lower_body_diff_norm = lower_body_diff.norm(dim=-1).mean()
-        vr_3point_diff_norm = vr_3point_diff.norm(dim=-1).mean()
         joint_pos_diff_norm = joint_pos_diff.norm(dim=-1).mean()
 
         self.log_dict["upper_body_diff_norm"] = upper_body_diff_norm
         self.log_dict["lower_body_diff_norm"] = lower_body_diff_norm
-        self.log_dict["vr_3point_diff_norm"] = vr_3point_diff_norm
         self.log_dict["joint_pos_diff_norm"] = joint_pos_diff_norm
-        
+
+        if "motion_tracking_link" in self.config.robot.motion:
+            vr_3point_diff = self.dif_global_body_pos[:, self.motion_tracking_id, :]
+            vr_3point_diff_norm = vr_3point_diff.norm(dim=-1).mean()
+            self.log_dict["vr_3point_diff_norm"] = vr_3point_diff_norm
 
     def _draw_debug_vis(self):
         self.simulator.clear_lines()
@@ -571,6 +578,8 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         return r_body_pos
     
     def _reward_teleop_vr_3point(self):
+        if "motion_tracking_link" not in self.config.robot.motion:
+            return torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
         vr_3point_diff = self.dif_global_body_pos[:, self.motion_tracking_id, :]
         vr_3point_dist = (vr_3point_diff**2).mean(dim=-1).mean(dim=-1)
         r_vr_3point = torch.exp(-vr_3point_dist / self.config.rewards.reward_tracking_sigma.teleop_vr_3point_pos)

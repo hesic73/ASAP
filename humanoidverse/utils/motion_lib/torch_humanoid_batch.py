@@ -100,7 +100,7 @@ class Humanoid_Batch:
 
         self.dof_axis = torch.tensor(self.dof_axis)
 
-        for extend_config in cfg.extend_config:
+        for extend_config in cfg.get("extend_config", []):
             self.body_names_augment += [extend_config.joint_name]
             self._parents = torch.cat([self._parents, torch.tensor(
                 [self.body_names.index(extend_config.parent_name)]).to(device)], dim=0)
@@ -184,18 +184,24 @@ class Humanoid_Batch:
             "body_to_joint": body_to_joint
         }
 
-    def fk_batch(self, pose: torch.Tensor, trans: torch.Tensor, convert_to_mat: bool = True, return_full: bool = False, dt: float = 1/30) -> Dict[str, torch.Tensor]:
-        device, dtype = pose.device, pose.dtype
-        pose_input = pose.clone()
-        B, seq_len = pose.shape[:2]
-        # H1 fitted joints might have extra joints
-        pose = pose[..., :len(self._parents), :]
+    def fk_batch(self, pose_aa: torch.Tensor, trans: torch.Tensor, return_full: bool = False, dt: float = 1/30) -> Dict[str, Union[torch.Tensor, int]]:
+        """Perform forward kinematics on a batch of poses.
 
-        if convert_to_mat:
-            pose_quat = axis_angle_to_quaternion(pose.clone())
-            pose_mat = quaternion_to_matrix(pose_quat)
-        else:
-            pose_mat = pose
+        Args:
+            pose_aa (torch.Tensor): The input pose in axis-angle representation. (batch_size, seq_len, num_joints, 3)
+            trans (torch.Tensor): The translation vector for the root joint. (batch_size, seq_len, 3)
+            return_full (bool, optional): Whether to return the full output or not. Defaults to False.
+            dt (float, optional): Delta time for velocity computation. Defaults to 1/30.
+
+        Returns:
+            Dict[str, Union[torch.Tensor, int]]: forward kinematics results.
+        """
+        B, seq_len = pose_aa.shape[:2]
+        # H1 fitted joints might have extra joints
+        pose_aa = pose_aa[..., :len(self._parents), :]
+
+        pose_quat = axis_angle_to_quaternion(pose_aa.clone())
+        pose_mat = quaternion_to_matrix(pose_quat)
 
         if pose_mat.shape != 5:
             pose_mat = pose_mat.reshape(B, seq_len, -1, 3, 3)
@@ -206,7 +212,7 @@ class Humanoid_Batch:
         return_dict = EasyDict()
 
         wbody_rot = wxyz_to_xyzw(matrix_to_quaternion(wbody_mat))
-        if len(self.cfg.extend_config) > 0:
+        if len(self.cfg.get("extend_config", [])) > 0:
             if return_full:
                 return_dict.global_velocity_extend = self._compute_velocity(
                     wbody_pos, dt)
@@ -235,15 +241,16 @@ class Humanoid_Batch:
             return_dict.global_angular_velocity = rigidbody_angular_velocity
             return_dict.global_velocity = rigidbody_linear_velocity
 
-            if len(self.cfg.extend_config) > 0:
+            if len(self.cfg.get("extend_config", [])) > 0:
                 # you can sum it up since unitree's each joint has 1 dof. Last two are for hands. doesn't really matter.
-                return_dict.dof_pos = pose.sum(dim=-1)[..., 1:self.num_bodies]
+                return_dict.dof_pos = pose_aa.sum(
+                    dim=-1)[..., 1:self.num_bodies]
             else:
                 if not len(self.actuated_joints_idx) == len(self.body_names):
-                    return_dict.dof_pos = pose.sum(
+                    return_dict.dof_pos = pose_aa.sum(
                         dim=-1)[..., self.actuated_joints_idx]
                 else:
-                    return_dict.dof_pos = pose.sum(dim=-1)[..., 1:]
+                    return_dict.dof_pos = pose_aa.sum(dim=-1)[..., 1:]
 
             dof_vel = (
                 (return_dict.dof_pos[:, 1:] - return_dict.dof_pos[:, :-1])/dt)
