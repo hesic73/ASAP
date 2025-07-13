@@ -17,6 +17,7 @@ from humanoidverse.utils.config_utils import *  # noqa: E402, F403
 from loguru import logger
 
 
+
 # from humanoidverse.envs.base_task.base_task import BaseTask
 # from humanoidverse.envs.base_task.omnih2o_cfg import OmniH2OCfg
 
@@ -24,13 +25,11 @@ from loguru import logger
 def main(override_config: OmegaConf):
     OmegaConf.resolve(override_config)
     # logging to hydra log file
-    hydra_log_path = os.path.join(
-        HydraConfig.get().runtime.output_dir, "eval.log")
+    hydra_log_path = os.path.join(HydraConfig.get().runtime.output_dir, "eval.log")
     logger.remove()
     logger.add(hydra_log_path, level="DEBUG")
 
-    # Get log level from LOGURU_LEVEL environment variable or use INFO as
-    # default
+    # Get log level from LOGURU_LEVEL environment variable or use INFO as default
     console_log_level = os.environ.get("LOGURU_LEVEL", "INFO").upper()
     logger.add(sys.stdout, level=console_log_level, colorize=True)
 
@@ -65,8 +64,7 @@ def main(override_config: OmegaConf):
     else:
         if override_config.eval_overrides is not None:
             config = override_config.copy()
-            eval_overrides = OmegaConf.to_container(
-                config.eval_overrides, resolve=True)
+            eval_overrides = OmegaConf.to_container(config.eval_overrides, resolve=True)
             for arg in sys.argv[1:]:
                 if not arg.startswith("+"):
                     key = arg.split("=")[0]
@@ -76,15 +74,14 @@ def main(override_config: OmegaConf):
             config = OmegaConf.merge(config, eval_overrides)
         else:
             config = override_config
-
+            
     simulator_type = config.simulator['_target_'].split('.')[-1]
     if simulator_type == 'IsaacSim':
         from omni.isaac.lab.app import AppLauncher
         import argparse
-        parser = argparse.ArgumentParser(
-            description="Evaluate an RL agent with RSL-RL.")
+        parser = argparse.ArgumentParser(description="Evaluate an RL agent with RSL-RL.")
         AppLauncher.add_app_launcher_args(parser)
-
+        
         args_cli, hydra_args = parser.parse_known_args()
         sys.argv = [sys.argv[0]] + hydra_args
         args_cli.num_envs = config.num_envs
@@ -93,11 +90,12 @@ def main(override_config: OmegaConf):
         args_cli.output_dir = config.output_dir
         args_cli.headless = config.headless
 
+        
         app_launcher = AppLauncher(args_cli)
         simulation_app = app_launcher.app
     if simulator_type == 'IsaacGym':
         import isaacgym
-
+        
     from humanoidverse.agents.base_algo.base_algo import BaseAlgo  # noqa: E402
     from humanoidverse.utils.helpers import pre_process_config
     import torch
@@ -117,17 +115,11 @@ def main(override_config: OmegaConf):
         OmegaConf.save(config, file)
 
     ckpt_num = config.checkpoint.split('/')[-1].split('_')[-1].split('.')[0]
-    config.env.config.save_rendering_dir = str(
-        checkpoint.parent / "renderings" / f"ckpt_{ckpt_num}")
-    # commented out for now, might need it back to save motion
-    config.env.config.ckpt_dir = str(checkpoint.parent)
+    config.env.config.save_rendering_dir = str(checkpoint.parent / "renderings" / f"ckpt_{ckpt_num}")
+    config.env.config.ckpt_dir = str(checkpoint.parent) # commented out for now, might need it back to save motion
     env = instantiate(config.env, device=device)
 
-    algo: BaseAlgo = instantiate(
-        config.algo,
-        env=env,
-        device=device,
-        log_dir=None)
+    algo: BaseAlgo = instantiate(config.algo, env=env, device=device, log_dir=None)
     algo.setup()
     algo.load(config.checkpoint)
 
@@ -140,38 +132,21 @@ def main(override_config: OmegaConf):
 
     # from checkpoint path
 
-    ROBOVERSE_ROOT_DIR = os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__)))
-    exported_policy_path = os.path.join(
-        ROBOVERSE_ROOT_DIR, checkpoint_dir, 'exported')
+    ROBOVERSE_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    exported_policy_path = os.path.join(ROBOVERSE_ROOT_DIR, checkpoint_dir, 'exported')
     os.makedirs(exported_policy_path, exist_ok=True)
     exported_policy_name = checkpoint_path.split('/')[-1]
     exported_onnx_name = exported_policy_name.replace('.pt', '.onnx')
 
     if EXPORT_POLICY:
-        export_policy_as_jit(
-            algo.alg.actor_critic,
-            exported_policy_path,
-            exported_policy_name)
-        logger.info(
-            'Exported policy as jit script to: ',
-            os.path.join(
-                exported_policy_path,
-                exported_policy_name))
+        export_policy_as_jit(algo.alg.actor_critic, exported_policy_path, exported_policy_name)
+        logger.info('Exported policy as jit script to: ', os.path.join(exported_policy_path, exported_policy_name))
     if EXPORT_ONNX:
         example_obs_dict = algo.get_example_obs()
-        export_policy_as_onnx(
-            algo.inference_model,
-            exported_policy_path,
-            exported_onnx_name,
-            example_obs_dict)
+        export_policy_as_onnx(algo.inference_model, exported_policy_path, exported_onnx_name, example_obs_dict)
         # Jiawei: don't have a better way for conflicts now; need to comment out the following line for force control
         # export_policy_and_estimator_as_onnx(algo.inference_model, exported_policy_path, exported_onnx_name, example_obs_dict)
-        logger.info(
-            f'Exported policy as onnx to: {
-                os.path.join(
-                    exported_policy_path,
-                    exported_onnx_name)}')
+        logger.info(f'Exported policy as onnx to: {os.path.join(exported_policy_path, exported_onnx_name)}')
 
     algo.evaluate_policy(max_steps=500)
 

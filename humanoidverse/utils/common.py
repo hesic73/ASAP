@@ -36,8 +36,7 @@ import numpy as np
 import torch
 
 
-# if there's overlap between args_list and commandline input, use
-# commandline input
+# if there's overlap between args_list and commandline input, use commandline input
 def solve_argv_conflict(args_list):
     arguments_to_be_removed = []
     arguments_size = []
@@ -48,7 +47,7 @@ def solve_argv_conflict(args_list):
             for i, args in enumerate(args_list):
                 if args == argv:
                     arguments_to_be_removed.append(args)
-                    for more_args in args_list[i + 1:]:
+                    for more_args in args_list[i + 1 :]:
                         if not more_args.startswith("-"):
                             size_count += 1
                         else:
@@ -109,8 +108,7 @@ def seeding(seed=0, torch_deterministic=False):
     torch.cuda.manual_seed_all(seed)
 
     if torch_deterministic:
-        # refer to
-        # https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
+        # refer to https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True

@@ -20,7 +20,7 @@ import omni.isaac.lab.envs.mdp as mdp
 #             "operation": "scale",
 #         },
 #     )
-
+    
 #     random_joint_friction = EventTerm(
 #         func=mdp.randomize_joint_parameters,
 #         mode="startup",
@@ -31,9 +31,11 @@ import omni.isaac.lab.envs.mdp as mdp
 #         },
 #     )
 
-
 @configclass
 class EventCfg:
     """Configuration for events."""
     scale_body_mass = None
     random_joint_friction = None
+    
+
+    

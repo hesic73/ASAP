@@ -22,7 +22,6 @@ from rich.panel import Panel
 from rich.live import Live
 console = Console()
 
-
 class PPODecoupled(PPO):
     def __init__(self,
                  env: BaseTask,
@@ -52,12 +51,8 @@ class PPODecoupled(PPO):
         self.critic = PPOCritic(self.algo_obs_dim_dict,
                                 self.config.module_dict.critic).to(self.device)
 
-        self.actor_optimizer = optim.Adam(
-            self.actor.parameters(),
-            lr=self.actor_learning_rate)
-        self.critic_optimizer = optim.Adam(
-            self.critic.parameters(),
-            lr=self.critic_learning_rate)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.actor_learning_rate)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.critic_learning_rate)
 
     def _rollout_step(self, obs_dict):
         with torch.inference_mode():
@@ -66,25 +61,23 @@ class PPODecoupled(PPO):
                 # actions = self.actor.act(obs_dict["actor_obs"]).detach()
 
                 policy_state_dict = {}
-                policy_state_dict = self._actor_rollout_step(
-                    obs_dict, policy_state_dict)
+                policy_state_dict = self._actor_rollout_step(obs_dict, policy_state_dict)
                 values = self._critic_eval_step(obs_dict).detach()
                 policy_state_dict["values"] = values
 
-                # Append states to storage
+                ## Append states to storage
                 for obs_key in obs_dict.keys():
                     self.storage.update_key(obs_key, obs_dict[obs_key])
 
                 for obs_ in policy_state_dict.keys():
                     self.storage.update_key(obs_, policy_state_dict[obs_])
 
-                # Get the lower body actions
+                ## Get the lower body actions
                 actions_lower_body = policy_state_dict["actions"]
-                # Get the upper body actions
+                ## Get the upper body actions
                 actions_upper_body = self.env.ref_upper_dof_pos
-                # Concatenate the lower and upper body actions
-                actions = torch.cat(
-                    [actions_lower_body, actions_upper_body], dim=1)
+                ## Concatenate the lower and upper body actions
+                actions = torch.cat([actions_lower_body, actions_upper_body], dim=1)
                 actor_state = {"actions": actions}
                 obs_dict, rewards, dones, infos = self.env.step(actor_state)
                 # critic_obs = privileged_obs if privileged_obs is not None else obs
@@ -95,8 +88,7 @@ class PPODecoupled(PPO):
                 self.episode_env_tensors.add(infos["to_log"])
                 rewards_stored = rewards.clone().unsqueeze(1)
                 if 'time_outs' in infos:
-                    rewards_stored += self.gamma * \
-                        policy_state_dict['values'] * infos['time_outs'].unsqueeze(1).to(self.device)
+                    rewards_stored += self.gamma * policy_state_dict['values'] * infos['time_outs'].unsqueeze(1).to(self.device)
                 assert len(rewards_stored.shape) == 2
                 self.storage.update_key('rewards', rewards_stored)
                 self.storage.update_key('dones', dones.unsqueeze(1))
@@ -111,24 +103,22 @@ class PPODecoupled(PPO):
                     self.cur_reward_sum += rewards
                     self.cur_episode_length += 1
                     new_ids = (dones > 0).nonzero(as_tuple=False)
-                    self.rewbuffer.extend(
-                        self.cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
-                    self.lenbuffer.extend(
-                        self.cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
+                    self.rewbuffer.extend(self.cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                    self.lenbuffer.extend(self.cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
                     self.cur_reward_sum[new_ids] = 0
                     self.cur_episode_length[new_ids] = 0
 
             self.stop_time = time.time()
             self.collection_time = self.stop_time - self.start_time
             self.start_time = self.stop_time
-
+            
             # prepare data for training
 
             returns, advantages = self._compute_returns(
                 last_obs_dict=obs_dict,
-                policy_state_dict=dict(values=self.storage.query_key('values'),
-                                       dones=self.storage.query_key('dones'),
-                                       rewards=self.storage.query_key('rewards'))
+                policy_state_dict=dict(values=self.storage.query_key('values'), 
+                dones=self.storage.query_key('dones'), 
+                rewards=self.storage.query_key('rewards'))
             )
             self.storage.batch_update_data('returns', returns)
             self.storage.batch_update_data('advantages', advantages)
@@ -136,25 +126,20 @@ class PPODecoupled(PPO):
         # Update the upper body action scale
         if len(self.lenbuffer) == 0:
             mean_lenbuffer = 0
-        else:
-            mean_lenbuffer = statistics.mean(self.lenbuffer)
+        else: mean_lenbuffer = statistics.mean(self.lenbuffer)
         if mean_lenbuffer > 0.9 * self.env.max_episode_length:
             self.env.action_scale_upper_body += 0.05
         else:
             self.env.action_scale_upper_body -= 0.01
         # Constraint the upper body action scale to (0, 1)
-        self.env.action_scale_upper_body = max(
-            0, min(self.env.action_scale_upper_body, 1))
+        self.env.action_scale_upper_body = max(0, min(self.env.action_scale_upper_body, 1))
 
         return obs_dict
-
+    
     def _logging_to_writer(self, log_dict, train_log_dict, env_log_dict):
         super()._logging_to_writer(log_dict, train_log_dict, env_log_dict)
         # Log the action scale for the upper body
-        self.writer.add_scalar(
-            'Env/action_scale_upper_body',
-            self.env.action_scale_upper_body,
-            log_dict['it'])
+        self.writer.add_scalar('Env/action_scale_upper_body', self.env.action_scale_upper_body, log_dict['it'])
 
     def env_step(self, actor_state):
         actions_lower_body = actor_state["actions"]

@@ -19,6 +19,8 @@ if TYPE_CHECKING:
     from omni.isaac.lab.envs import DirectRLEnv, ManagerBasedEnv, ViewerCfg
 
 
+
+
 class ViewportCameraController:
     """This class handles controlling the camera associated with a viewport in the simulator.
 
@@ -64,27 +66,22 @@ class ViewportCameraController:
             # in the scene when this is called. Instead, we subscribe to the post update event to update the camera
             # at each rendering step.
             if self.cfg.asset_name is None:
-                raise ValueError(
-                    f"No asset name provided for viewer with origin type: '{
-                        self.cfg.origin_type}'.")
+                raise ValueError(f"No asset name provided for viewer with origin type: '{self.cfg.origin_type}'.")
         else:
             # set the camera origin to the center of the world
             self.update_view_to_world()
 
-        # subscribe to post update event so that camera view can be updated at
-        # each rendering step
+        # subscribe to post update event so that camera view can be updated at each rendering step
         app_interface = omni.kit.app.get_app_interface()
         app_event_stream = app_interface.get_post_update_event_stream()
         self._viewport_camera_update_handle = app_event_stream.create_subscription_to_pop(
-            lambda event, obj=weakref.proxy(self): obj._update_tracking_callback(event))
+            lambda event, obj=weakref.proxy(self): obj._update_tracking_callback(event)
+        )
 
     def __del__(self):
         """Unsubscribe from the callback."""
-        # use hasattr to handle case where __init__ has not completed before
-        # __del__ is called
-        if hasattr(
-                self,
-                "_viewport_camera_update_handle") and self._viewport_camera_update_handle is not None:
+        # use hasattr to handle case where __init__ has not completed before __del__ is called
+        if hasattr(self, "_viewport_camera_update_handle") and self._viewport_camera_update_handle is not None:
             self._viewport_camera_update_handle.unsubscribe()
             self._viewport_camera_update_handle = None
 
@@ -113,9 +110,9 @@ class ViewportCameraController:
         # check that the env_index is within bounds
         if env_index < 0 or env_index >= self._env.config.scene.num_envs:
             raise ValueError(
-                f"Out of range value for attribute 'env_index': {env_index}." f" Expected a value between 0 and {
-                    self._env.config.scene.num_envs -
-                    1} for the current environment.")
+                f"Out of range value for attribute 'env_index': {env_index}."
+                f" Expected a value between 0 and {self._env.config.scene.num_envs - 1} for the current environment."
+            )
         # update the environment index
         self.cfg.env_index = env_index
         # update the camera view if the origin is set to env type (since, the camera view is static)
@@ -153,12 +150,9 @@ class ViewportCameraController:
         """
         # check if the asset is in the scene
         if self.cfg.asset_name != asset_name:
-            asset_entities = [
-                *self._env.scene.rigid_objects.keys(),
-                *self._env.scene.articulations.keys()]
+            asset_entities = [*self._env.scene.rigid_objects.keys(), *self._env.scene.articulations.keys()]
             if asset_name not in asset_entities:
-                raise ValueError(
-                    f"Asset '{asset_name}' is not in the scene. Available entities: {asset_entities}.")
+                raise ValueError(f"Asset '{asset_name}' is not in the scene. Available entities: {asset_entities}.")
         # update the asset name
         self.cfg.asset_name = asset_name
         # set origin type to asset_root
@@ -168,10 +162,7 @@ class ViewportCameraController:
         # update the camera view
         self.update_view_location()
 
-    def update_view_location(
-            self,
-            eye: Sequence[float] | None = None,
-            lookat: Sequence[float] | None = None):
+    def update_view_location(self, eye: Sequence[float] | None = None, lookat: Sequence[float] | None = None):
         """Updates the camera view pose based on the current viewer origin and the eye and lookat positions.
 
         Args:
@@ -198,7 +189,6 @@ class ViewportCameraController:
     def _update_tracking_callback(self, event):
         """Updates the camera view at each rendering step."""
         # update the camera view if the origin is set to asset_root
-        # in other cases, the camera view is static and does not need to be
-        # updated continuously
+        # in other cases, the camera view is static and does not need to be updated continuously
         if self.cfg.origin_type == "asset_root" and self.cfg.asset_name is not None:
             self.update_view_to_asset_root(self.cfg.asset_name)

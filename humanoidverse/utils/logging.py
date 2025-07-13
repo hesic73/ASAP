@@ -4,7 +4,6 @@ from contextlib import contextmanager
 import sys
 import os
 
-
 class HydraLoggerBridge(logging.Handler):
     def emit(self, record):
         # Get corresponding loguru level
@@ -19,12 +18,7 @@ class HydraLoggerBridge(logging.Handler):
             frame = frame.f_back
             depth += 1
 
-        logger.opt(
-            depth=depth,
-            exception=record.exc_info).log(
-            level,
-            record.getMessage())
-
+        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
 class LoguruStream:
     def write(self, message):
@@ -33,7 +27,6 @@ class LoguruStream:
 
     def flush(self):
         pass
-
 
 @contextmanager
 def capture_stdout_to_loguru():

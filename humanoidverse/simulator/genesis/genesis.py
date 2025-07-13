@@ -14,17 +14,15 @@ from rich.progress import Progress
 from humanoidverse.simulator.base_simulator.base_simulator import BaseSimulator
 import copy
 
-
 class Genesis(BaseSimulator):
     """
-    Base class for robotic simulation environments, providing a framework for simulation setup,
+    Base class for robotic simulation environments, providing a framework for simulation setup, 
     environment creation, and control over robotic assets and simulation properties.
     """
-
     def __init__(self, config, device):
         """
         Initializes the base simulator with configuration settings and simulation device.
-
+        
         Args:
             config (dict): Configuration dictionary for the simulation.
             device (str): Device type for simulation ('cpu' or 'cuda').
@@ -50,7 +48,7 @@ class Genesis(BaseSimulator):
 
     def setup(self):
         """
-        Initializes the simulator parameters and environment. This method should be implemented
+        Initializes the simulator parameters and environment. This method should be implemented 
         by subclasses to set specific simulator configurations.
         """
 
@@ -63,10 +61,7 @@ class Genesis(BaseSimulator):
                 substeps=self.sim_substeps,
             ),
             viewer_options=gs.options.ViewerOptions(
-                max_FPS=int(
-                    1 /
-                    self.sim_dt *
-                    self.sim_cfg.sim.control_decimation),
+                max_FPS=int(1 / self.sim_dt * self.sim_cfg.sim.control_decimation),
                 camera_pos=(2.0, 0.0, 2.5),
                 camera_lookat=(0.0, 0.0, 0.5),
                 camera_fov=40,
@@ -90,7 +85,7 @@ class Genesis(BaseSimulator):
 
     def setup_terrain(self, mesh_type):
         """
-        Configures the terrain based on specified mesh type.
+        Configures the terrain based on specified mesh type. 
 
         Args:
             mesh_type (str): Type of terrain mesh ('plane', 'heightfield', 'trimesh').
@@ -102,8 +97,7 @@ class Genesis(BaseSimulator):
             # )
             plane = self.scene.add_entity(gs.morphs.Plane())
         elif mesh_type == 'trimesh':
-            raise NotImplementedError(
-                f"Mesh type {mesh_type} hasn't been implemented in genesis subclass.")
+            raise NotImplementedError(f"Mesh type {mesh_type} hasn't been implemented in genesis subclass.")
 
     # ----- Robot Asset Setup Methods -----
 
@@ -143,9 +137,8 @@ class Genesis(BaseSimulator):
 
         self.genesis_link_names = [link.name for link in self.robot.links]
         self.humanoidverse_link_names = self.robot_cfg.body_names
-        self.link_mapping_genesis_to_humanoidverse_idx = [
-            self.genesis_link_names.index(name) for name in self.humanoidverse_link_names]
-
+        self.link_mapping_genesis_to_humanoidverse_idx = [self.genesis_link_names.index(name) for name in self.humanoidverse_link_names]
+        
         # names to indices
         self.dof_ids = [
             self.robot.get_joint(name).dof_idx_local
@@ -153,11 +146,9 @@ class Genesis(BaseSimulator):
         ]
 
         self.body_names = self.robot_cfg.body_names
-        # = len(self.rigid_solver.links) - 1
-        self.num_bodies = len(self.body_names)
+        self.num_bodies = len(self.body_names)                # = len(self.rigid_solver.links) - 1
         self.dof_names = dof_names_list
-        # = len(self.rigid_solver.joints) - 2
-        self.num_dof = len(dof_names_list)
+        self.num_dof = len(dof_names_list)                    # = len(self.rigid_solver.joints) - 2
 
     # ----- Environment Creation Methods -----
 
@@ -204,50 +195,26 @@ class Genesis(BaseSimulator):
     def get_dof_limits_properties(self):
         """
         Retrieves the DOF (degrees of freedom) limits and properties.
-
+        
         Returns:
             Tuple of tensors representing position limits, velocity limits, and torque limits for each DOF.
         """
-        self.hard_dof_pos_limits = torch.zeros(
-            self.num_dof,
-            2,
-            dtype=torch.float,
-            device=self.sim_device,
-            requires_grad=False)
-        self.dof_pos_limits = torch.zeros(
-            self.num_dof,
-            2,
-            dtype=torch.float,
-            device=self.sim_device,
-            requires_grad=False)
-        self.dof_vel_limits = torch.zeros(
-            self.num_dof,
-            dtype=torch.float,
-            device=self.sim_device,
-            requires_grad=False)
-        self.torque_limits = torch.zeros(
-            self.num_dof,
-            dtype=torch.float,
-            device=self.sim_device,
-            requires_grad=False)
+        self.hard_dof_pos_limits = torch.zeros(self.num_dof, 2, dtype=torch.float, device=self.sim_device, requires_grad=False)
+        self.dof_pos_limits = torch.zeros(self.num_dof, 2, dtype=torch.float, device=self.sim_device, requires_grad=False)
+        self.dof_vel_limits = torch.zeros(self.num_dof, dtype=torch.float, device=self.sim_device, requires_grad=False)
+        self.torque_limits = torch.zeros(self.num_dof, dtype=torch.float, device=self.sim_device, requires_grad=False)
         for i in range(self.num_dof):
-            self.hard_dof_pos_limits[i,
-                                     0] = self.robot_cfg.dof_pos_lower_limit_list[i]
-            self.hard_dof_pos_limits[i,
-                                     1] = self.robot_cfg.dof_pos_upper_limit_list[i]
-            self.dof_pos_limits[i,
-                                0] = self.robot_cfg.dof_pos_lower_limit_list[i]
-            self.dof_pos_limits[i,
-                                1] = self.robot_cfg.dof_pos_upper_limit_list[i]
+            self.hard_dof_pos_limits[i, 0] = self.robot_cfg.dof_pos_lower_limit_list[i]
+            self.hard_dof_pos_limits[i, 1] = self.robot_cfg.dof_pos_upper_limit_list[i]
+            self.dof_pos_limits[i, 0] = self.robot_cfg.dof_pos_lower_limit_list[i]
+            self.dof_pos_limits[i, 1] = self.robot_cfg.dof_pos_upper_limit_list[i]
             self.dof_vel_limits[i] = self.robot_cfg.dof_vel_limit_list[i]
             self.torque_limits[i] = self.robot_cfg.dof_effort_limit_list[i]
             # soft limits
             m = (self.dof_pos_limits[i, 0] + self.dof_pos_limits[i, 1]) / 2
             r = self.dof_pos_limits[i, 1] - self.dof_pos_limits[i, 0]
-            self.dof_pos_limits[i, 0] = m - 0.5 * r * \
-                self.cfg.rewards.reward_limit.soft_dof_pos_limit
-            self.dof_pos_limits[i, 1] = m + 0.5 * r * \
-                self.cfg.rewards.reward_limit.soft_dof_pos_limit
+            self.dof_pos_limits[i, 0] = m - 0.5 * r * self.cfg.rewards.reward_limit.soft_dof_pos_limit
+            self.dof_pos_limits[i, 1] = m + 0.5 * r * self.cfg.rewards.reward_limit.soft_dof_pos_limit
         return self.dof_pos_limits, self.dof_vel_limits, self.torque_limits
 
     # ----- Simulation Preparation and Refresh Methods -----
@@ -257,6 +224,7 @@ class Genesis(BaseSimulator):
         Prepares the simulation environment and refreshes any relevant tensors.
         """
         self.scene.step()
+
 
         self.base_pos = self.robot.get_pos()
         base_quat = self.robot.get_quat()
@@ -294,6 +262,8 @@ class Genesis(BaseSimulator):
             dtype=gs.tc_float,
         )
 
+
+
     def refresh_sim_tensors(self):
         """
         Refreshes the state tensors in the simulation to ensure they are up-to-date.
@@ -327,16 +297,11 @@ class Genesis(BaseSimulator):
             dtype=gs.tc_float,
         )
         # import ipdb; ipdb.set_trace()
-        self._rigid_body_pos = self.robot.get_links_pos()[
-            :, self.link_mapping_genesis_to_humanoidverse_idx]
-        # (num_envs, 4) isaacsim uses wxyz, we keep xyzw for consistency
-        self._rigid_body_rot = self.robot.get_links_quat()[
-            :, self.link_mapping_genesis_to_humanoidverse_idx]
+        self._rigid_body_pos = self.robot.get_links_pos()[:, self.link_mapping_genesis_to_humanoidverse_idx]
+        self._rigid_body_rot = self.robot.get_links_quat()[:, self.link_mapping_genesis_to_humanoidverse_idx]  # (num_envs, 4) isaacsim uses wxyz, we keep xyzw for consistency
         self._rigid_body_rot = self._rigid_body_rot[..., [1, 2, 3, 0]]
-        self._rigid_body_vel = self.robot.get_links_vel()[
-            :, self.link_mapping_genesis_to_humanoidverse_idx]
-        self._rigid_body_ang_vel = self.robot.get_links_ang()[
-            :, self.link_mapping_genesis_to_humanoidverse_idx]
+        self._rigid_body_vel = self.robot.get_links_vel()[:, self.link_mapping_genesis_to_humanoidverse_idx]
+        self._rigid_body_ang_vel = self.robot.get_links_ang()[:, self.link_mapping_genesis_to_humanoidverse_idx]
 
     # ----- Control Application Methods -----
 
@@ -349,6 +314,7 @@ class Genesis(BaseSimulator):
         """
         self.robot.control_dofs_force(torques, self.dof_ids)
 
+    
     def set_actor_root_state_tensor(self, set_env_ids, root_states):
         """
         Sets the root state tensor for specified actors within environments.
@@ -380,12 +346,12 @@ class Genesis(BaseSimulator):
             base_quat, zero_velocity=False, envs_idx=set_env_ids
         )
         self.robot.set_dofs_velocity(
-            base_lin_vel, dofs_idx_local=[0, 1, 2], envs_idx=set_env_ids
+            base_lin_vel, dofs_idx_local=[0, 1, 2],  envs_idx=set_env_ids
         )
         self.robot.set_dofs_velocity(
-            base_ang_vel, dofs_idx_local=[3, 4, 5], envs_idx=set_env_ids
+            base_ang_vel, dofs_idx_local=[3, 4, 5],  envs_idx=set_env_ids
         )
-
+    
     def set_dof_state_tensor(self, set_env_ids, dof_states):
         """
         Sets the DOF state tensor for specified actors within environments.
@@ -436,20 +402,14 @@ class Genesis(BaseSimulator):
     @property
     def dof_state(self):
         # This will always use the latest dof_pos and dof_vel
-        return torch.cat(
-            [self.dof_pos[..., None], self.dof_vel[..., None]], dim=-1)
-
+        return torch.cat([self.dof_pos[..., None], self.dof_vel[..., None]], dim=-1)
+    
     def add_visualize_entities(self, num_visualize_markers):
         # self.scene.add_entity(gs.morphs.Sphere())
         self.visualize_entities = []
         for i in range(num_visualize_markers):
-            self.visualize_entities.append(
-                self.scene.add_entity(
-                    gs.morphs.Sphere(
-                        radius=0.04,
-                        visualization=True,
-                        collision=False)))
-
+            self.visualize_entities.append(self.scene.add_entity(gs.morphs.Sphere(radius=0.04, visualization=True, collision=False)))
+    
      # debug visualization
     def clear_lines(self):
         # self.scene.clear_debug_objects()

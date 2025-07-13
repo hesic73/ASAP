@@ -78,17 +78,16 @@ class Humanoid_Batch:
             [self.body_names.index(k) for k, v in mjcf_data['body_to_joint'].items()])
 
         for m in motors:
-            if m not in joints:
+            if not m in joints:
                 logger.warning(
                     f"Motor {m} not found in joints. This might cause issues with the FK computation.")
 
-        if "type" in tree.getroot().find("worldbody").findall(
-                './/joint')[0].attrib and tree.getroot().find("worldbody").findall('.//joint')[0].attrib['type'] == "free":
+        if "type" in tree.getroot().find("worldbody").findall('.//joint')[0].attrib and tree.getroot().find("worldbody").findall('.//joint')[0].attrib['type'] == "free":
             for j in tree.getroot().find("worldbody").findall('.//joint')[1:]:
                 self.dof_axis.append([int(i)
                                      for i in j.attrib['axis'].split(" ")])
             self.has_freejoint = True
-        elif "type" not in tree.getroot().find("worldbody").findall('.//joint')[0].attrib:
+        elif not "type" in tree.getroot().find("worldbody").findall('.//joint')[0].attrib:
             for j in tree.getroot().find("worldbody").findall('.//joint'):
                 self.dof_axis.append([int(i)
                                      for i in j.attrib['axis'].split(" ")])
@@ -177,22 +176,15 @@ class Humanoid_Batch:
         _add_xml_node(xml_body_root, -1, 0)
         assert (len(joints_range) == self.num_dof)
         return {
-            "node_names": node_names, "parent_indices": torch.from_numpy(
-                np.array(
-                    parent_indices, dtype=np.int32)), "local_translation": torch.from_numpy(
-                np.array(
-                    local_translation, dtype=np.float32)), "local_rotation": torch.from_numpy(
-                        np.array(
-                            local_rotation, dtype=np.float32)), "joints_range": torch.from_numpy(
-                                np.array(joints_range)), "body_to_joint": body_to_joint}
+            "node_names": node_names,
+            "parent_indices": torch.from_numpy(np.array(parent_indices, dtype=np.int32)),
+            "local_translation": torch.from_numpy(np.array(local_translation, dtype=np.float32)),
+            "local_rotation": torch.from_numpy(np.array(local_rotation, dtype=np.float32)),
+            "joints_range": torch.from_numpy(np.array(joints_range)),
+            "body_to_joint": body_to_joint
+        }
 
-    def fk_batch(self,
-                 pose_aa: torch.Tensor,
-                 trans: torch.Tensor,
-                 return_full: bool = False,
-                 dt: float = 1 / 30) -> Dict[str,
-                                             Union[torch.Tensor,
-                                                   int]]:
+    def fk_batch(self, pose_aa: torch.Tensor, trans: torch.Tensor, return_full: bool = False, dt: float = 1/30) -> Dict[str, Union[torch.Tensor, int]]:
         """Perform forward kinematics on a batch of poses.
 
         Args:
@@ -239,8 +231,7 @@ class Humanoid_Batch:
         return_dict.global_rotation_mat = wbody_mat
         return_dict.global_rotation = wbody_rot
         if return_full:
-            # Isaac gym is [x, y, z, w]. All the previous functions are [w, x,
-            # y, z]
+            # Isaac gym is [x, y, z, w]. All the previous functions are [w, x, y, z]
             rigidbody_linear_velocity = self._compute_velocity(wbody_pos, dt)
             rigidbody_angular_velocity = self._compute_angular_velocity(
                 wbody_rot, dt)
@@ -251,8 +242,7 @@ class Humanoid_Batch:
             return_dict.global_velocity = rigidbody_linear_velocity
 
             if len(self.cfg.get("extend_config", [])) > 0:
-                # you can sum it up since unitree's each joint has 1 dof. Last
-                # two are for hands. doesn't really matter.
+                # you can sum it up since unitree's each joint has 1 dof. Last two are for hands. doesn't really matter.
                 return_dict.dof_pos = pose_aa.sum(
                     dim=-1)[..., 1:self.num_bodies]
             else:
@@ -263,18 +253,14 @@ class Humanoid_Batch:
                     return_dict.dof_pos = pose_aa.sum(dim=-1)[..., 1:]
 
             dof_vel = (
-                (return_dict.dof_pos[:, 1:] - return_dict.dof_pos[:, :-1]) / dt)
+                (return_dict.dof_pos[:, 1:] - return_dict.dof_pos[:, :-1])/dt)
             return_dict.dof_vels = torch.cat(
                 [dof_vel, dof_vel[:, -2:-1]], dim=1)
-            return_dict.fps = int(1 / dt)
+            return_dict.fps = int(1/dt)
 
         return return_dict
 
-    def forward_kinematics_batch(self,
-                                 rotations: torch.Tensor,
-                                 root_rotations: torch.Tensor,
-                                 root_positions: torch.Tensor) -> Tuple[torch.Tensor,
-                                                                        torch.Tensor]:
+    def forward_kinematics_batch(self, rotations: torch.Tensor, root_rotations: torch.Tensor, root_positions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Perform forward kinematics using the given trajectory and local rotations.
         Arguments (where B = batch size, J = number of joints):
@@ -300,16 +286,10 @@ class Humanoid_Batch:
                 rotations_world.append(root_rotations)
             else:
                 try:
-                    jpos = (torch.matmul(rotations_world[self._parents[i]][:,
-                                                                           :,
-                                                                           0],
-                                         expanded_offsets[:,
-                                                          :,
-                                                          i,
-                                                          :,
-                                                          None]).squeeze(-1) + positions_world[self._parents[i]])
+                    jpos = (torch.matmul(rotations_world[self._parents[i]][:, :, 0], expanded_offsets[:, :, i, :, None]).squeeze(
+                        -1) + positions_world[self._parents[i]])
                     rot_mat = torch.matmul(rotations_world[self._parents[i]], torch.matmul(
-                        self._local_rotation_mat[:, (i):(i + 1)], rotations[:, :, (i - 1):i, :]))
+                        self._local_rotation_mat[:,  (i):(i + 1)], rotations[:, :, (i - 1):i, :]))
                 except Exception as e:
                     logger.error(f"Error at joint index {i}")
                     logger.error(f"Parent index: {self._parents[i]}")
@@ -327,10 +307,7 @@ class Humanoid_Batch:
         return positions_world, rotations_world
 
     @staticmethod
-    def _compute_velocity(
-            p: torch.Tensor,
-            time_delta: float,
-            guassian_filter: bool = True):
+    def _compute_velocity(p: torch.Tensor, time_delta: float, guassian_filter: bool = True):
         velocity = np.gradient(p.numpy(), axis=-3) / time_delta
         if guassian_filter:
             velocity = torch.from_numpy(filters.gaussian_filter1d(
@@ -341,25 +318,11 @@ class Humanoid_Batch:
         return velocity
 
     @staticmethod
-    def _compute_angular_velocity(
-            r: torch.Tensor,
-            time_delta: float,
-            guassian_filter: bool = True):
+    def _compute_angular_velocity(r: torch.Tensor, time_delta: float, guassian_filter: bool = True):
         # assume the second last dimension is the time axis
         diff_quat_data = quat_identity_like(r).to(r)
-        diff_quat_data[...,
-                       :-1,
-                       :,
-                       :] = quat_mul_norm(r[...,
-                                            1:,
-                                            :,
-                                            :],
-                                          quat_inverse(r[...,
-                                                         :-1,
-                                                         :,
-                                                         :],
-                                                       w_last=True),
-                                          w_last=True)
+        diff_quat_data[..., :-1, :, :] = quat_mul_norm(
+            r[..., 1:, :, :], quat_inverse(r[..., :-1, :, :], w_last=True), w_last=True)
         diff_angle, diff_axis = quat_angle_axis(diff_quat_data, w_last=True)
         angular_velocity = diff_axis * diff_angle.unsqueeze(-1) / time_delta
         if guassian_filter:
@@ -392,9 +355,7 @@ class Humanoid_Batch:
             return None
 
         mesh_dict = {}
-        for mesh_file_node in track(
-                all_mesh_nodes,
-                description="Loading Meshes ..."):
+        for mesh_file_node in track(all_mesh_nodes, description="Loading Meshes ..."):
             mesh_name = mesh_file_node.attrib["name"]
             mesh_file = mesh_file_node.attrib["file"]
             mesh_full_file = osp.join(mesh_base, mesh_file)
@@ -419,19 +380,15 @@ class Humanoid_Batch:
                 # 为每个geom（无论是否有名字）解析并存储其变换
                 # 使用默认值 "0 0 0" 和 "1 0 0 0" 来处理没有pos/quat属性的geom
                 transform = {
-                    "pos": np.fromstring(
-                        geom_node.attrib.get(
-                            "pos", "0 0 0"), dtype=float, sep=" "), "quat": np.fromstring(
-                        geom_node.attrib.get(
-                            "quat", "1 0 0 0"), dtype=float, sep=" ")}
+                    "pos": np.fromstring(geom_node.attrib.get("pos", "0 0 0"), dtype=float, sep=" "),
+                    "quat": np.fromstring(geom_node.attrib.get("quat", "1 0 0 0"), dtype=float, sep=" ")
+                }
                 # 将变换按顺序添加到对应body的列表中
                 self.geom_transforms_per_body[parent_name].append(transform)
 
         self.mesh_dict = mesh_dict
 
-    def mesh_fk(self,
-                pose: Optional[torch.Tensor] = None,
-                trans: Optional[torch.Tensor] = None):
+    def mesh_fk(self, pose: Optional[torch.Tensor] = None, trans: Optional[torch.Tensor] = None):
         """
         Load the mesh from the XML file and merge them into the humanoid based on the current pose.
         """

@@ -1,8 +1,3 @@
-from humanoidverse.utils.helpers import pre_process_config
-from humanoidverse.envs.motion_tracking.motion_tracking import LeggedRobotMotionTracking
-from omegaconf import OmegaConf
-from pathlib import Path
-from humanoidverse.agents.ppo.ppo import PPO
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -26,6 +21,16 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.live import Live
 console = Console()
+
+
+from humanoidverse.agents.ppo.ppo import PPO
+from humanoidverse.envs.base_task.base_task import BaseTask
+from pathlib import Path
+from omegaconf import OmegaConf
+from humanoidverse.envs.motion_tracking.motion_tracking import LeggedRobotMotionTracking
+from humanoidverse.utils.helpers import pre_process_config
+from humanoidverse.agents.base_algo.base_algo import BaseAlgo 
+from hydra.utils import instantiate
 
 
 class PPODeltaA(PPO):
@@ -55,11 +60,10 @@ class PPODeltaA(PPO):
                     policy_config = OmegaConf.merge(
                         policy_config, policy_config.eval_overrides
                     )
-
+            
         pre_process_config(policy_config)
-
-        self.loaded_policy: BaseAlgo = instantiate(
-            policy_config.algo, env=env, device=device, log_dir=None)
+        
+        self.loaded_policy: BaseAlgo = instantiate(policy_config.algo, env=env, device=device, log_dir=None)
         self.loaded_policy.algo_obs_dim_dict = policy_config.env.config.robot.algo_obs_dim_dict
         self.loaded_policy.setup()
         # import ipdb; ipdb.set_trace()
@@ -68,27 +72,31 @@ class PPODeltaA(PPO):
         #         print(f"Parameter name: {name}, Parameter:  {param}")
         self.loaded_policy.load(config.policy_checkpoint)
 
+        
         # import ipdb; ipdb.set_trace()
         self.loaded_policy._eval_mode()
 
         for name, param in self.loaded_policy.actor.actor_module.module.named_parameters():
             param.requires_grad = False
             # print(f"Parameter name: {name}, Parameter: {param}, Requires Grad: {param.requires_grad}")
-
-        # import ipdb; ipdb.set_trace()
+        
+        # import ipdb; ipdb.set_trace()   
         self.loaded_policy.eval_policy = self.loaded_policy._get_inference_policy()
+        
 
-        # ----------------- UNCOMMENT THIS FOR ANALYTIC SEARCH FOR OPTIMAL ACTI
+        # ----------------- UNCOMMENT THIS FOR ANALYTIC SEARCH FOR OPTIMAL ACTION BASED ON DELTA_A -----------------
         # if not hasattr(env, 'loaded_extra_policy'):
         #     setattr(env, 'loaded_extra_policy', self.loaded_policy)
         # if not hasattr(env.loaded_extra_policy, 'eval_policy'):
         #     setattr(env.loaded_extra_policy, 'eval_policy', self.loaded_policy._get_inference_policy())
 
-        # ----------------- UNCOMMENT THIS FOR ANALYTIC SEARCH FOR OPTIMAL ACTI
-
+        # ----------------- UNCOMMENT THIS FOR ANALYTIC SEARCH FOR OPTIMAL ACTION BASED ON DELTA_A -----------------    
+        
+    
     # def _actor_act_step(self, obs_dict):
     #     actions = self.actor.act(obs_dict["actor_obs"])
     #     return self.actor.act_inference(obs_dict["actor_obs"])
+
 
     def _rollout_step(self, obs_dict):
         # import ipdb; ipdb.set_trace()
@@ -100,12 +108,11 @@ class PPODeltaA(PPO):
                 # actions = self.actor.act(obs_dict["actor_obs"]).detach()
 
                 policy_state_dict = {}
-                policy_state_dict = self._actor_rollout_step(
-                    obs_dict, policy_state_dict)
+                policy_state_dict = self._actor_rollout_step(obs_dict, policy_state_dict)
                 values = self._critic_eval_step(obs_dict).detach()
                 policy_state_dict["values"] = values
 
-                # Append states to storage
+                ## Append states to storage
                 for obs_key in obs_dict.keys():
                     self.storage.update_key(obs_key, obs_dict[obs_key])
 
@@ -114,11 +121,12 @@ class PPODeltaA(PPO):
                 actions = policy_state_dict["actions"]
                 actor_state = {}
                 actor_state["actions"] = actions
-
+                
                 ################ inference the policy ################
-                policy_output = self.loaded_policy.eval_policy(
-                    obs_dict['closed_loop_actor_obs']).detach()
+                policy_output = self.loaded_policy.eval_policy(obs_dict['closed_loop_actor_obs']).detach()
                 actor_state["actions_closed_loop"] = policy_output
+
+                
 
                 # print('rollout_step actor_obs: ', obs_dict['actor_obs'])
                 # print('rollout_step closed_loop_actor_obs: ', obs_dict['closed_loop_actor_obs'])
@@ -136,8 +144,7 @@ class PPODeltaA(PPO):
                 self.episode_env_tensors.add(infos["to_log"])
                 rewards_stored = rewards.clone().unsqueeze(1)
                 if 'time_outs' in infos:
-                    rewards_stored += self.gamma * \
-                        policy_state_dict['values'] * infos['time_outs'].unsqueeze(1).to(self.device)
+                    rewards_stored += self.gamma * policy_state_dict['values'] * infos['time_outs'].unsqueeze(1).to(self.device)
                 assert len(rewards_stored.shape) == 2
                 self.storage.update_key('rewards', rewards_stored)
                 self.storage.update_key('dones', dones.unsqueeze(1))
@@ -152,37 +159,34 @@ class PPODeltaA(PPO):
                     self.cur_reward_sum += rewards
                     self.cur_episode_length += 1
                     new_ids = (dones > 0).nonzero(as_tuple=False)
-                    self.rewbuffer.extend(
-                        self.cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
-                    self.lenbuffer.extend(
-                        self.cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
+                    self.rewbuffer.extend(self.cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                    self.lenbuffer.extend(self.cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
                     self.cur_reward_sum[new_ids] = 0
                     self.cur_episode_length[new_ids] = 0
 
             self.stop_time = time.time()
             self.collection_time = self.stop_time - self.start_time
             self.start_time = self.stop_time
-
+            
             # prepare data for training
 
             returns, advantages = self._compute_returns(
                 last_obs_dict=obs_dict,
-                policy_state_dict=dict(values=self.storage.query_key('values'),
-                                       dones=self.storage.query_key('dones'),
-                                       rewards=self.storage.query_key('rewards'))
+                policy_state_dict=dict(values=self.storage.query_key('values'), 
+                dones=self.storage.query_key('dones'), 
+                rewards=self.storage.query_key('rewards'))
             )
             self.storage.batch_update_data('returns', returns)
             self.storage.batch_update_data('advantages', advantages)
 
         return obs_dict
+    
 
     def _pre_eval_env_step(self, actor_state: dict):
         actions = self.eval_policy(actor_state["obs"]['actor_obs'])
-        actions_closed_loop = self.loaded_policy.eval_policy(
-            actor_state['obs']['closed_loop_actor_obs']).detach()
+        actions_closed_loop = self.loaded_policy.eval_policy(actor_state['obs']['closed_loop_actor_obs']).detach()
 
-        actor_state.update({"actions": actions,
-                            "actions_closed_loop": actions_closed_loop})
+        actor_state.update({"actions": actions, "actions_closed_loop": actions_closed_loop})
         # actor_state.update({"actions": actions, "actions_closed_loop": actions_closed_loop, "current_closed_loop_actor_obs": actor_state['obs']['closed_loop_actor_obs']})
         # print("updated closed loop actor obs: ", actor_state['current_closed_loop_actor_obs'])
         for c in self.eval_callbacks:

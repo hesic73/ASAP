@@ -12,11 +12,7 @@ def normalize(x: torch.Tensor, eps: float = 1e-9):
 
 
 @torch.jit.script
-def torch_rand_float(
-        lower,
-        upper,
-        shape: Tuple[int],
-        device: torch.device) -> torch.Tensor:
+def torch_rand_float(lower, upper, shape: Tuple[int], device: torch.device) -> torch.Tensor:
     return (upper - lower) * torch.rand(*shape, device=device) + lower
 
 

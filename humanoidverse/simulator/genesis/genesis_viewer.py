@@ -31,8 +31,7 @@ class Viewer:
 
     def __del__(self):
         """Unsubscribe from the callback."""
-        # use hasattr to handle case where __init__ has not completed before
-        # __del__ is called
+        # use hasattr to handle case where __init__ has not completed before __del__ is called
         return
 
     """
