@@ -5,33 +5,37 @@ from loguru import logger
 from omegaconf import DictConfig
 from typing import Dict, Any
 
+
 class HistoryHandler:
 
-    def __init__(self, num_envs:int, history_config:DictConfig, obs_dims:Dict[str,int], device:torch.device):
+    def __init__(self, num_envs: int, history_config: DictConfig, obs_dims: Dict[str, int], device: torch.device):
         self.obs_dims = obs_dims
         self.device = device
         self.num_envs = num_envs
-        self.history:Dict[str, torch.Tensor] = {}
+        self.history: Dict[str, torch.Tensor] = {}
 
-        self.buffer_config:Dict[str, int] = {}
+        self.buffer_config: Dict[str, int] = {}
         for aux_key, aux_config in history_config.items():
             for obs_key, obs_num in aux_config.items():
                 if obs_key in self.buffer_config:
-                    self.buffer_config[obs_key] = max(self.buffer_config[obs_key], obs_num)
+                    self.buffer_config[obs_key] = max(
+                        self.buffer_config[obs_key], obs_num)
                 else:
                     self.buffer_config[obs_key] = obs_num
-        
+
         for key in self.buffer_config.keys():
-            self.history[key] = torch.zeros(num_envs, self.buffer_config[key], obs_dims[key], device=self.device)
+            self.history[key] = torch.zeros(
+                num_envs, self.buffer_config[key], obs_dims[key], device=self.device)
 
         logger.info(colored("History Handler Initialized", "green"))
         for key, value in self.buffer_config.items():
             logger.info(f"Key: {key}, Value: {value}")
 
-    def reset(self, reset_ids:torch.Tensor):
-        if len(reset_ids)==0:
+    def reset(self, reset_ids: torch.Tensor):
+        if len(reset_ids) == 0:
             return
-        assert set(self.buffer_config.keys()) == set(self.history.keys()), f"History keys mismatch\n{self.buffer_config.keys()}\n{self.history.keys()}"
+        assert set(self.buffer_config.keys()) == set(self.history.keys(
+        )), f"History keys mismatch\n{self.buffer_config.keys()}\n{self.history.keys()}"
         for key in self.history.keys():
             self.history[key][reset_ids] *= 0.
 

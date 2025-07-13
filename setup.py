@@ -6,7 +6,8 @@ setup(
     license="BSD-3-Clause",
     packages=find_packages(),
     description='ASAP: ligning Simulation and Real-World Physics for Learning Agile Humanoid Whole-Body Skills',
-    url="https://github.com/LeCAR-Lab/ASAP",  # Update this with your actual repository URL
+    # Update this with your actual repository URL
+    url="https://github.com/LeCAR-Lab/ASAP",
     python_requires=">=3.8",
     install_requires=[
         "hydra-core>=1.2.0",

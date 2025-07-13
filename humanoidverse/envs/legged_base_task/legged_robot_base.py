@@ -400,7 +400,8 @@ class LeggedRobotBase(BaseTask):
         if self.config.termination.terminate_when_close_to_dof_pos_limit:
             out_of_dof_pos_limits = - \
                 (self.simulator.dof_pos -
-                 self.simulator.dof_pos_limits_termination[:, 0]).clip(max=0.)  # lower limit
+                 # lower limit
+                 self.simulator.dof_pos_limits_termination[:, 0]).clip(max=0.)
             out_of_dof_pos_limits += (self.simulator.dof_pos -
                                       self.simulator.dof_pos_limits_termination[:, 1]).clip(min=0.)
 
@@ -870,7 +871,8 @@ class LeggedRobotBase(BaseTask):
             self.feet_air_max_height, self.simulator._rigid_body_pos[:, self.feet_indices, 2])
 
         rew_feet_max_height = torch.sum((torch.clamp_min(self.config.rewards.desired_feet_max_height_for_this_air -
-                                        self.feet_air_max_height, 0)) * from_air_to_contact, dim=1)  # reward only on first contact with the ground
+                                        # reward only on first contact with the ground
+                                                         self.feet_air_max_height, 0)) * from_air_to_contact, dim=1)
         self.feet_air_max_height *= ~contact_filt
         return rew_feet_max_height
 
@@ -931,7 +933,8 @@ class LeggedRobotBase(BaseTask):
         self.need_to_refresh_envs[env_ids] = True
         max_vel = self.config.domain_rand.max_push_vel_xy
         self.push_robot_vel_buf[env_ids] = torch_rand_float(
-            -max_vel, max_vel, (len(env_ids), 2), device=str(self.device))  # lin vel x/y
+            # lin vel x/y
+            -max_vel, max_vel, (len(env_ids), 2), device=str(self.device))
         self.record_push_robot_vel_buf[env_ids] = self.push_robot_vel_buf[env_ids].clone(
         )
         self.simulator.robot_root_states[env_ids,
@@ -982,7 +985,8 @@ class LeggedRobotBase(BaseTask):
                 self.simulator.robot_root_states[env_ids,
                                                  :3] += self.env_origins[env_ids]
                 self.simulator.robot_root_states[env_ids, :2] += torch_rand_float(-1., 1., (len(
-                    env_ids), 2), device=str(self.device))  # xy position within 1m of the center
+                    # xy position within 1m of the center
+                    env_ids), 2), device=str(self.device))
             else:
                 self.simulator.robot_root_states[env_ids] = self.base_init_state
                 self.simulator.robot_root_states[env_ids,
@@ -990,7 +994,8 @@ class LeggedRobotBase(BaseTask):
             # base velocities
 
             self.simulator.robot_root_states[env_ids, 7:13] = torch_rand_float(-0.5, 0.5, (len(
-                env_ids), 6), device=str(self.device))  # [7:10]: lin vel, [10:13]: ang vel
+                # [7:10]: lin vel, [10:13]: ang vel
+                env_ids), 6), device=str(self.device))
 
     def _plot_domain_rand_params(self):
         raise NotImplementedError

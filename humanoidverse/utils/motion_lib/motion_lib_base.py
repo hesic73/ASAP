@@ -37,7 +37,8 @@ class MotionLibBase():
             self.m_cfg.asset.assetFileName
         self.skeleton_tree = SkeletonTree.from_mjcf(skeleton_file)
         logger.info(f"Loaded skeleton from {skeleton_file}")
-        logger.info(f"Pre-loading motion data from {self.m_cfg.motion_file} into memory...")
+        logger.info(
+            f"Pre-loading motion data from {self.m_cfg.motion_file} into memory...")
         self._preload_data(self.m_cfg.motion_file)
         self.setup_constants()
 
@@ -49,13 +50,13 @@ class MotionLibBase():
             motion_files = [data_path]
         else:
             motion_files = glob.glob(osp.join(data_path, "*.pkl"))
-        
+
         self._motion_data_cache = []
         for f in track(motion_files, description="Pre-loading motions into memory..."):
             data = joblib.load(f)
             key = list(data.keys())[0]
             motion_data = data[key]
-            
+
             self._motion_data_cache.append({
                 'root_trans_offset': np.asarray(motion_data['root_trans_offset'], dtype=np.float32),
                 'pose_aa': np.asarray(motion_data['pose_aa'], dtype=np.float32),
@@ -63,8 +64,8 @@ class MotionLibBase():
             })
 
         self._num_unique_motions = len(self._motion_data_cache)
-        logger.info(f"Pre-loaded {self._num_unique_motions} unique motions into memory.")
-
+        logger.info(
+            f"Pre-loaded {self._num_unique_motions} unique motions into memory.")
 
     def setup_constants(self):
         # ... (The rest of the original setup_constants method remains unchanged)
@@ -137,22 +138,26 @@ class MotionLibBase():
         if "gts_t" in self.__dict__:
             rg_pos_t0 = self.gts_t[f0l]
             rg_pos_t1 = self.gts_t[f1l]
-            
+
             rg_rot_t0 = self.grs_t[f0l]
             rg_rot_t1 = self.grs_t[f1l]
-            
+
             body_vel_t0 = self.gvs_t[f0l]
             body_vel_t1 = self.gvs_t[f1l]
-            
+
             body_ang_vel_t0 = self.gavs_t[f0l]
             body_ang_vel_t1 = self.gavs_t[f1l]
             if offset is None:
-                rg_pos_t = (1.0 - blend_exp) * rg_pos_t0 + blend_exp * rg_pos_t1  
+                rg_pos_t = (1.0 - blend_exp) * rg_pos_t0 + \
+                    blend_exp * rg_pos_t1
             else:
-                rg_pos_t = (1.0 - blend_exp) * rg_pos_t0 + blend_exp * rg_pos_t1 + offset[..., None, :]
+                rg_pos_t = (1.0 - blend_exp) * rg_pos_t0 + \
+                    blend_exp * rg_pos_t1 + offset[..., None, :]
             rg_rot_t = slerp(rg_rot_t0, rg_rot_t1, blend_exp)
-            body_vel_t = (1.0 - blend_exp) * body_vel_t0 + blend_exp * body_vel_t1
-            body_ang_vel_t = (1.0 - blend_exp) * body_ang_vel_t0 + blend_exp * body_ang_vel_t1
+            body_vel_t = (1.0 - blend_exp) * body_vel_t0 + \
+                blend_exp * body_vel_t1
+            body_ang_vel_t = (1.0 - blend_exp) * \
+                body_ang_vel_t0 + blend_exp * body_ang_vel_t1
         else:
             rg_pos_t = rg_pos
             rg_rot_t = rb_rot
@@ -196,12 +201,15 @@ class MotionLibBase():
                 num_motion_to_load) + start_idx, self._num_unique_motions).to(self._device)
 
         self._curr_motion_ids = sample_idxes
-        
-        logger.info(f"Loading {num_motion_to_load} motions from memory cache...")
-        logger.info(f"Sampling motion indices: {sample_idxes[:5].cpu().numpy()}, ....")
 
-        sampled_motion_data = [self._motion_data_cache[i] for i in sample_idxes.cpu().numpy()]
-        
+        logger.info(
+            f"Loading {num_motion_to_load} motions from memory cache...")
+        logger.info(
+            f"Sampling motion indices: {sample_idxes[:5].cpu().numpy()}, ....")
+
+        sampled_motion_data = [self._motion_data_cache[i]
+                               for i in sample_idxes.cpu().numpy()]
+
         for curr_file_data in track(sampled_motion_data, description="Processing motions..."):
             seq_len = curr_file_data['root_trans_offset'].shape[0]
             if max_len == -1 or seq_len < max_len:
@@ -209,12 +217,13 @@ class MotionLibBase():
             else:
                 start = random.randint(0, seq_len - max_len)
                 end = start + max_len
-            
-            trans = to_torch(curr_file_data['root_trans_offset']).clone()[start:end]
+
+            trans = to_torch(curr_file_data['root_trans_offset']).clone()[
+                start:end]
             pose_aa = to_torch(curr_file_data['pose_aa'][start:end]).clone()
             motion_fps = curr_file_data['fps']
             dt = 1.0 / motion_fps
-            
+
             if self.mesh_parsers is not None:
                 curr_motion = self.mesh_parsers.fk_batch(
                     pose_aa[None, ], trans[None, ], return_full=True, dt=dt)
@@ -270,7 +279,7 @@ class MotionLibBase():
             [m.global_velocity for m in motions], dim=0).float().to(self._device)
         # (*, 23)
         self.dvs = torch.cat([m.dof_vels for m in motions],
-                                dim=0).float().to(self._device)
+                             dim=0).float().to(self._device)
 
         if "global_translation_extend" in motions[0].__dict__:
             # (*, 27, 3)
@@ -302,7 +311,6 @@ class MotionLibBase():
         total_len = self.get_total_length()
         logger.info(
             f"Processed {num_motions:d} motions with a total length of {total_len:.3f}s and {self.gts.shape[0]} frames.")
-
 
     def get_total_length(self) -> float:
         # This method remains unchanged from the original

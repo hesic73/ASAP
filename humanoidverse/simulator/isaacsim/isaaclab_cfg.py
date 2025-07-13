@@ -34,7 +34,8 @@ from omni.isaac.lab_assets import H1_CFG
 # from humanoidverse.envs.base_task.modes import OmniH2OModes
 # from humanoidverse.envs.base_task.rewards import RewardCfg
 
-TEST_DATA_DIR = os.path.join(os.path.dirname(__file__), "../../../../../tests/data/")
+TEST_DATA_DIR = os.path.join(os.path.dirname(
+    __file__), "../../../../../tests/data/")
 
 
 @configclass
@@ -66,7 +67,8 @@ class IsaacLabCfg(DirectRLEnvCfg):
     distill_teleop_selected_keypoints_names = None
 
     # simulation
-    sim: SimulationCfg = SimulationCfg(dt=dt, render_interval=substeps, physx=PhysxCfg(bounce_threshold_velocity=0.2))
+    sim: SimulationCfg = SimulationCfg(
+        dt=dt, render_interval=substeps, physx=PhysxCfg(bounce_threshold_velocity=0.2))
     # TODO(rhua): using flat terrain until RayCaster is fixed
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
@@ -83,12 +85,14 @@ class IsaacLabCfg(DirectRLEnvCfg):
     )
 
     # scene
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=2, env_spacing=4.0, replicate_physics=True)
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(
+        num_envs=2, env_spacing=4.0, replicate_physics=True)
 
     # robot
     actuators = {
         "legs": IdealPDActuatorCfg(
-            joint_names_expr=[".*_hip_yaw", ".*_hip_roll", ".*_hip_pitch", ".*_knee", "torso"],
+            joint_names_expr=[".*_hip_yaw", ".*_hip_roll",
+                              ".*_hip_pitch", ".*_knee", "torso"],
             effort_limit={
                 ".*_hip_yaw": 200.0,
                 ".*_hip_roll": 200.0,
@@ -114,7 +118,8 @@ class IsaacLabCfg(DirectRLEnvCfg):
             damping=0,
         ),
         "arms": IdealPDActuatorCfg(
-            joint_names_expr=[".*_shoulder_pitch", ".*_shoulder_roll", ".*_shoulder_yaw", ".*_elbow"],
+            joint_names_expr=[".*_shoulder_pitch",
+                              ".*_shoulder_roll", ".*_shoulder_yaw", ".*_elbow"],
             effort_limit={
                 ".*_shoulder_pitch": 40.0,
                 ".*_shoulder_roll": 40.0,
@@ -132,7 +137,8 @@ class IsaacLabCfg(DirectRLEnvCfg):
         ),
     }
 
-    robot: ArticulationCfg = H1_CFG.replace(prim_path="/World/envs/env_.*/Robot", actuators=actuators)
+    robot: ArticulationCfg = H1_CFG.replace(
+        prim_path="/World/envs/env_.*/Robot", actuators=actuators)
 
     body_names = [
         "pelvis",
@@ -286,7 +292,8 @@ class IsaacLabCfg(DirectRLEnvCfg):
 
     # When we resample reference motions
     resample_motions = True  # if we want to resample reference motions
-    resample_motions_for_envs_interval_s = 1000  # How many seconds between we resample the reference motions
+    # How many seconds between we resample the reference motions
+    resample_motions_for_envs_interval_s = 1000
 
     # observation noise
     add_policy_obs_noise = True

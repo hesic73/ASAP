@@ -56,7 +56,6 @@ roboverse/data/Recorded/
 roboverse/data/AMASS/
 AMASS/*
 
-*.sh
 *.txt
 *.stl
 

@@ -47,7 +47,7 @@ def solve_argv_conflict(args_list):
             for i, args in enumerate(args_list):
                 if args == argv:
                     arguments_to_be_removed.append(args)
-                    for more_args in args_list[i + 1 :]:
+                    for more_args in args_list[i + 1:]:
                         if not more_args.startswith("-"):
                             size_count += 1
                         else:
