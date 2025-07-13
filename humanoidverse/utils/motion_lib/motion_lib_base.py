@@ -219,8 +219,9 @@ class MotionLibBase():
                 end = start + max_len
 
             trans = to_torch(curr_file_data['root_trans_offset']).clone()[
-                start:end]
-            pose_aa = to_torch(curr_file_data['pose_aa'][start:end]).clone()
+                start:end].to(self._device)
+            pose_aa = to_torch(
+                curr_file_data['pose_aa'][start:end]).clone().to(self._device)
             motion_fps = curr_file_data['fps']
             dt = 1.0 / motion_fps
 

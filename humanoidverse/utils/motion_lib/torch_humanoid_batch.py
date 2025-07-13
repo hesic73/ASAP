@@ -308,7 +308,7 @@ class Humanoid_Batch:
 
     @staticmethod
     def _compute_velocity(p: torch.Tensor, time_delta: float, guassian_filter: bool = True):
-        velocity = np.gradient(p.numpy(), axis=-3) / time_delta
+        velocity = np.gradient(p.cpu().numpy(), axis=-3) / time_delta
         if guassian_filter:
             velocity = torch.from_numpy(filters.gaussian_filter1d(
                 velocity, 2, axis=-3, mode="nearest")).to(p)
@@ -327,7 +327,7 @@ class Humanoid_Batch:
         angular_velocity = diff_axis * diff_angle.unsqueeze(-1) / time_delta
         if guassian_filter:
             angular_velocity = torch.from_numpy(filters.gaussian_filter1d(
-                angular_velocity.numpy(), 2, axis=-3, mode="nearest"),)
+                angular_velocity.cpu().numpy(), 2, axis=-3, mode="nearest"),)
         return angular_velocity
 
     def load_mesh(self):
