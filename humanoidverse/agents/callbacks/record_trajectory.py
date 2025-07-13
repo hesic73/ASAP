@@ -17,6 +17,8 @@ class RecordTrajectoryCallback(RL_EvalCallback):
     def on_pre_eval_env_step(self, actor_state: Dict[str, Any]) -> Dict[str, Any]:
         super().on_pre_eval_env_step(actor_state)
         # NOTE (hsc): 因为PPO的evaluate_policy莫名在for loop外面额外调用了一次_pre_eval_env_step
+        # 我试图理解的一下，也许它希望保持的语义是，obs_t, action_t
+        # 但我其实只care obs_t, action_{t+1}
         if "step" in actor_state:
             obs = actor_state["obs"]['actor_obs'].cpu().numpy()
             self.observations.append(obs)
