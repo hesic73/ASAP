@@ -1,0 +1,11 @@
+defaults:
+  - _self_
+  - obs: motion_tracking
+
+robot:
+  num_bodies: 24
+  dof_obs_size: 23
+
+hydra:
+  job:
+    chdir: False

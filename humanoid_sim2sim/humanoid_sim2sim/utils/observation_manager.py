@@ -16,18 +16,18 @@ class ObservationManager:
         Args:
             config (DictConfig): The configuration object containing observation specs.
         """
-        self.obs_config = config.obs
+        self.config = config
 
         # --- 将 obs_dims 列表转换为字典，方便查询 ---
         self.obs_dims_map = {
-            key: val for item in self.obs_config.obs_dims for key, val in item.items()
+            key: val for item in self.config.obs_dims for key, val in item.items()
         }
 
         # --- Actor observation configuration ---
-        self.actor_obs_keys = sorted(self.obs_config.obs_dict.actor_obs)
+        self.actor_obs_keys = sorted(self.config.obs_dict.actor_obs)
 
         # --- History configuration for the actor ---
-        self.history_spec = self.obs_config.obs_auxiliary.get(
+        self.history_spec = self.config.obs_auxiliary.get(
             'history_actor', {})
         self.history_keys = sorted(self.history_spec.keys())
 
@@ -95,48 +95,13 @@ class ObservationManager:
                     history_component_parts.append(flat_history)
 
                 full_history_vec = np.concatenate(history_component_parts)
-                scaled_history = full_history_vec * self.obs_config.obs_scales.history_actor
+                scaled_history = full_history_vec * self.config.obs_scales.history_actor
                 obs_parts.append(scaled_history)
             else:
                 # 非历史部分总是使用最新的观测值
                 raw_value = self.current_raw_obs[key]
-                scale = self.obs_config.obs_scales[key]
+                scale = self.config.obs_scales[key]
                 scaled_value = raw_value * scale
                 obs_parts.append(scaled_value)
 
         return np.concatenate(obs_parts).astype(np.float32)
-
-
-if __name__ == "__main__":
-    from omegaconf import OmegaConf, DictConfig
-    config = OmegaConf.load(
-        "/home/sichenghe/25summer/ASAP/humanoidverse/config/obs/motion_tracking/motion_tracking.yaml")
-    override_config = OmegaConf.create({
-        "robot": {
-            "num_bodies": 24,
-            "dof_obs_size": 23,
-            "motion": {
-                "nums_extend_bodies": 0,
-            }
-        }
-    })
-    config = OmegaConf.merge(config, override_config)
-    OmegaConf.register_new_resolver("eval", eval)
-    OmegaConf.resolve(config)
-    print(OmegaConf.to_yaml(config))
-    observation_manager = ObservationManager(config)
-
-    observation_manager.update(
-        {
-            'actions': np.random.rand(23).astype(np.float32),
-            'base_ang_vel': np.random.rand(3).astype(np.float32),
-            "dif_local_rigid_body_pos": np.random.rand(3 * 24).astype(np.float32),
-            "local_ref_rigid_body_pos": np.random.rand(3 * 24).astype(np.float32),
-            "dof_pos": np.random.rand(23).astype(np.float32),
-            "dof_vel": np.random.rand(23).astype(np.float32),
-            "projected_gravity": np.random.rand(3).astype(np.float32),
-        }
-    )
-
-    initial_obs = observation_manager.get()
-    print("Initial observation vector:", initial_obs.shape)

@@ -20,7 +20,7 @@ from loguru import logger
 # from humanoidverse.envs.base_task.base_task import BaseTask
 # from humanoidverse.envs.base_task.omnih2o_cfg import OmniH2OCfg
 
-@hydra.main(config_path="config", config_name="base_eval")
+@hydra.main(config_path="config", config_name="base_eval", version_base="1.1")
 def main(override_config: OmegaConf):
     OmegaConf.resolve(override_config)
     # logging to hydra log file

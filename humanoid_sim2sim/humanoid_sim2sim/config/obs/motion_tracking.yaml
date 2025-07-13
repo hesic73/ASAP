@@ -1,0 +1,49 @@
+# @package _global_
+
+obs:
+  obs_dict:
+    actor_obs:
+      [
+        base_ang_vel,
+        projected_gravity,
+        dof_pos,
+        dof_vel,
+        actions,
+        dif_local_rigid_body_pos,
+        local_ref_rigid_body_pos,
+        history_actor,
+      ]
+
+  obs_auxiliary: # define those coumpounds in obs_dict, for example, you can define different long/short history with different length
+    history_actor:
+      {
+        base_ang_vel: 4,
+        projected_gravity: 4,
+        dof_pos: 4,
+        dof_vel: 4,
+        actions: 4,
+      }
+
+  obs_scales:
+    {
+      base_lin_vel: 2.0,
+      base_ang_vel: 0.25,
+      projected_gravity: 1.0,
+      dof_pos: 1.0,
+      dof_vel: 0.05,
+      actions: 1.0,
+      dif_local_rigid_body_pos: 1.0,
+      local_ref_rigid_body_pos: 1.0,
+      history_actor: 1.0,
+    }
+
+  obs_dims:
+    - base_lin_vel: 3
+    - base_ang_vel: 3
+    - projected_gravity: 3
+    - dof_pos: ${robot.dof_obs_size}
+    - dof_vel: ${robot.dof_obs_size}
+    - actions: ${robot.dof_obs_size}
+    - dif_local_rigid_body_pos: ${eval:'3 * ${robot.num_bodies}'}
+    - local_ref_rigid_body_pos: ${eval:'3 * ${robot.num_bodies}'}
+    - ref_motion_phase: 1
