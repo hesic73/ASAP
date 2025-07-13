@@ -25,6 +25,8 @@ console = Console()
 ##################################################################
 ######## Note: This agent is ONLY for EVALUATION purposes ########
 ##################################################################
+
+
 class PPOLocoManip(BaseAlgo):
     def __init__(self,
                  env: BaseTask,
@@ -32,7 +34,7 @@ class PPOLocoManip(BaseAlgo):
                  log_dir=None,
                  device='cpu'):
 
-        self.device= device
+        self.device = device
         self.env = env
         self.config = config
         self.log_dir = log_dir
@@ -46,8 +48,12 @@ class PPOLocoManip(BaseAlgo):
         self.ep_infos = []
         self.rewbuffer = deque(maxlen=100)
         self.lenbuffer = deque(maxlen=100)
-        self.cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
-        self.cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        self.cur_reward_sum = torch.zeros(
+            self.env.num_envs,
+            dtype=torch.float,
+            device=self.device)
+        self.cur_episode_length = torch.zeros(
+            self.env.num_envs, dtype=torch.float, device=self.device)
 
         self.eval_callbacks: list[RL_EvalCallback] = []
         self.episode_env_tensors = TensorAverageMeterDict()
@@ -88,12 +94,16 @@ class PPOLocoManip(BaseAlgo):
     def load(self, ckpt_stand_path, ckpt_loco_path):
         if ckpt_stand_path is not None:
             logger.info(f"Loading standing checkpoint from {ckpt_stand_path}")
-            loaded_dict_stand = torch.load(ckpt_stand_path, map_location=self.device)
-            self.actor[0].load_state_dict(loaded_dict_stand["actor_model_state_dict"])
+            loaded_dict_stand = torch.load(
+                ckpt_stand_path, map_location=self.device)
+            self.actor[0].load_state_dict(
+                loaded_dict_stand["actor_model_state_dict"])
         if ckpt_loco_path is not None:
             logger.info(f"Loading locomotion checkpoint from {ckpt_loco_path}")
-            loaded_dict_loco = torch.load(ckpt_loco_path, map_location=self.device)
-            self.actor[1].load_state_dict(loaded_dict_loco["actor_model_state_dict"])
+            loaded_dict_loco = torch.load(
+                ckpt_loco_path, map_location=self.device)
+            self.actor[1].load_state_dict(
+                loaded_dict_loco["actor_model_state_dict"])
         return loaded_dict_stand['infos'], loaded_dict_loco["infos"]
 
     def _process_env_step(self, rewards, dones, infos):
@@ -101,14 +111,14 @@ class PPOLocoManip(BaseAlgo):
 
     def _actor_act_step(self, obs_dict):
         return self.actor[self.env.control_mode].act(obs_dict)
-    
+
     @property
     def inference_model(self):
         return self.actor
 
-    ##########################################################################################
+    ##########################################################################
     # Code for Evaluation
-    ##########################################################################################
+    ##########################################################################
 
     def env_step(self, actor_state):
         actions_lower_body = actor_state["actions"]
@@ -138,7 +148,10 @@ class PPOLocoManip(BaseAlgo):
         step = 0
         self.eval_policy = self._get_inference_policy()
         obs_dict = self.env.reset_all()
-        init_actions = torch.zeros(self.env.num_envs, self.num_act, device=self.device)
+        init_actions = torch.zeros(
+            self.env.num_envs,
+            self.num_act,
+            device=self.device)
         actor_state.update({"obs": obs_dict, "actions": init_actions})
         actor_state = self._pre_eval_env_step(actor_state)
         while True:
@@ -154,7 +167,10 @@ class PPOLocoManip(BaseAlgo):
     def _create_eval_callbacks(self):
         if self.config.eval_callbacks is not None:
             for cb in self.config.eval_callbacks:
-                self.eval_callbacks.append(instantiate(self.config.eval_callbacks[cb], training_loop=self))
+                self.eval_callbacks.append(
+                    instantiate(
+                        self.config.eval_callbacks[cb],
+                        training_loop=self))
 
     def _pre_evaluate_policy(self, reset_env=True):
         self._eval_mode()

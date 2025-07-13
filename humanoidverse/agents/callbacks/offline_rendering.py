@@ -5,6 +5,7 @@ from humanoidverse.envs.legged_base_task.legged_robot_base import LeggedRobotBas
 from humanoidverse.agents.ppo.ppo import PPO
 from typing import List, Dict, Any, Optional
 
+
 class OfflineRenderingCallback(RL_EvalCallback):
     """
     Callback for offline rendering of evaluation episodes in IsaacGym.
@@ -34,14 +35,19 @@ class OfflineRenderingCallback(RL_EvalCallback):
         # Set default camera properties if not provided in config
         self.video_width = self.config.get("video_width", 1080)
         self.video_height = self.config.get("video_height", 1920)
-        self.camera_offset = gymapi.Vec3(*self.config.get("camera_offset", [0.8, -0.8, 0.3]))
-        self.camera_rotation_axis = gymapi.Vec3(*self.config.get("camera_rotation_axis", [0.0, 0.0, 1]))
-        self.camera_rotation_angle_deg = self.config.get("camera_rotation_angle_deg", 135)
-        self.camera_follow_mode_str = self.config.get("camera_follow_mode", "FOLLOW_POSITION")
+        self.camera_offset = gymapi.Vec3(
+            *self.config.get("camera_offset", [0.8, -0.8, 0.3]))
+        self.camera_rotation_axis = gymapi.Vec3(
+            *self.config.get("camera_rotation_axis", [0.0, 0.0, 1]))
+        self.camera_rotation_angle_deg = self.config.get(
+            "camera_rotation_angle_deg", 135)
+        self.camera_follow_mode_str = self.config.get(
+            "camera_follow_mode", "FOLLOW_POSITION")
         self.video_filename = self.config.get("video_filename", "eval.mp4")
 
         # Map string to gymapi constant
-        self.camera_follow_mode = self._get_camera_follow_mode(self.camera_follow_mode_str)
+        self.camera_follow_mode = self._get_camera_follow_mode(
+            self.camera_follow_mode_str)
 
     def _get_camera_follow_mode(self, mode_str: str) -> int:
         """Converts a string representation of camera follow mode to gymapi constant."""
@@ -50,7 +56,8 @@ class OfflineRenderingCallback(RL_EvalCallback):
         elif mode_str == "FOLLOW_TRANSFORM":
             return gymapi.FOLLOW_TRANSFORM
         else:
-            raise ValueError(f"Unknown camera follow mode: {mode_str}. Expected 'FOLLOW_POSITION' or 'FOLLOW_TRANSFORM'.")
+            raise ValueError(f"Unknown camera follow mode: {
+                             mode_str}. Expected 'FOLLOW_POSITION' or 'FOLLOW_TRANSFORM'.")
 
     def _setup_camera(self) -> None:
         """
@@ -66,11 +73,12 @@ class OfflineRenderingCallback(RL_EvalCallback):
         self.camera = gym.create_camera_sensor(env_handle, camera_properties)
 
         camera_rotation = gymapi.Quat.from_axis_angle(
-            self.camera_rotation_axis, np.deg2rad(self.camera_rotation_angle_deg)
-        )
+            self.camera_rotation_axis, np.deg2rad(
+                self.camera_rotation_angle_deg))
 
         actor_handle = gym.get_actor_handle(env_handle, 0)
-        body_handle = gym.get_actor_rigid_body_handle(env_handle, actor_handle, 0)
+        body_handle = gym.get_actor_rigid_body_handle(
+            env_handle, actor_handle, 0)
 
         gym.attach_camera_to_body(
             self.camera,
@@ -85,7 +93,8 @@ class OfflineRenderingCallback(RL_EvalCallback):
         Captures a single frame from the camera and appends it to the frames list.
         """
         if self.camera is None:
-            raise RuntimeError("Camera not initialized. Call _setup_camera() first.")
+            raise RuntimeError(
+                "Camera not initialized. Call _setup_camera() first.")
 
         gym = self.env.simulator.gym
         sim = self.env.simulator.sim
@@ -94,9 +103,10 @@ class OfflineRenderingCallback(RL_EvalCallback):
         gym.fetch_results(sim, True)
         gym.step_graphics(sim)
         gym.render_all_camera_sensors(sim)
-        img = gym.get_camera_image(sim, env_handle, self.camera, gymapi.IMAGE_COLOR)
+        img = gym.get_camera_image(
+            sim, env_handle, self.camera, gymapi.IMAGE_COLOR)
         img = np.reshape(img, (self.video_height, self.video_width, 4))
-        self.frames.append(img[..., :3]) # Keep only RGB channels
+        self.frames.append(img[..., :3])  # Keep only RGB channels
 
     def _save_video(self) -> None:
         """
@@ -109,7 +119,8 @@ class OfflineRenderingCallback(RL_EvalCallback):
         try:
             from moviepy.editor import ImageSequenceClip
         except ImportError:
-            print("moviepy not installed. Please install it to save videos: pip install moviepy")
+            print(
+                "moviepy not installed. Please install it to save videos: pip install moviepy")
             return
 
         fps = int(1.0 / self.env.dt)

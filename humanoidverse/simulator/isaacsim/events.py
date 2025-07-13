@@ -11,6 +11,7 @@ from omni.isaac.lab.managers import SceneEntityCfg
 
 from omni.isaac.lab.envs import ManagerBasedEnv
 
+
 def resolve_dist_fn(
     distribution: Literal["uniform", "log_uniform", "gaussian"] = "uniform",
 ):
@@ -27,6 +28,7 @@ def resolve_dist_fn(
 
     return dist_fn
 
+
 def randomize_body_com(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor | None,
@@ -34,7 +36,7 @@ def randomize_body_com(
     distribution_params: tuple[float, float] | tuple[torch.Tensor, torch.Tensor],
     operation: Literal["add", "abs", "scale"],
     distribution: Literal["uniform", "log_uniform", "gaussian"] = "uniform",
-    num_envs: int = 1, # number of environments
+    num_envs: int = 1,  # number of environments
 ):
     """Randomize the com of the bodies by adding, scaling or setting random values.
 
@@ -56,35 +58,49 @@ def randomize_body_com(
 
     # resolve body indices
     if asset_cfg.body_ids == slice(None):
-        body_ids = torch.arange(asset.num_bodies, dtype=torch.int, device="cpu")
+        body_ids = torch.arange(
+            asset.num_bodies,
+            dtype=torch.int,
+            device="cpu")
     else:
-        body_ids = torch.tensor(asset_cfg.body_ids, dtype=torch.int, device="cpu")
+        body_ids = torch.tensor(
+            asset_cfg.body_ids,
+            dtype=torch.int,
+            device="cpu")
 
     # get the current masses of the bodies (num_assets, num_bodies)
     coms = asset.root_physx_view.get_coms()
     # apply randomization on default values
     # import ipdb; ipdb.set_trace()
-    coms[env_ids[:, None], body_ids] = env.default_coms[env_ids[:, None], body_ids].clone()
+    coms[env_ids[:, None],
+         body_ids] = env.default_coms[env_ids[:, None], body_ids].clone()
 
     dist_fn = resolve_dist_fn(distribution)
 
     if isinstance(distribution_params[0], torch.Tensor):
-        distribution_params = (distribution_params[0].to(coms.device), distribution_params[1].to(coms.device))
+        distribution_params = (
+            distribution_params[0].to(
+                coms.device), distribution_params[1].to(
+                coms.device))
 
-    env.base_com_bias[env_ids, :] = dist_fn(
-        *distribution_params, (env_ids.shape[0], env.base_com_bias.shape[1]), device=coms.device
-    )
+    env.base_com_bias[env_ids,
+                      :] = dist_fn(*distribution_params,
+                                   (env_ids.shape[0],
+                                    env.base_com_bias.shape[1]),
+                                   device=coms.device)
 
     # sample from the given range
     if operation == "add":
-        coms[env_ids[:, None], body_ids, :3] += env.base_com_bias[env_ids[:, None], :]
+        coms[env_ids[:, None], body_ids,
+             :3] += env.base_com_bias[env_ids[:, None], :]
     elif operation == "abs":
-        coms[env_ids[:, None], body_ids, :3] = env.base_com_bias[env_ids[:, None], :]
+        coms[env_ids[:, None], body_ids,
+             :3] = env.base_com_bias[env_ids[:, None], :]
     elif operation == "scale":
-        coms[env_ids[:, None], body_ids, :3] *= env.base_com_bias[env_ids[:, None], :]
+        coms[env_ids[:, None], body_ids,
+             :3] *= env.base_com_bias[env_ids[:, None], :]
     else:
-        raise ValueError(
-            f"Unknown operation: '{operation}' for property randomization. Please use 'add', 'abs' or 'scale'."
-        )
+        raise ValueError(f"Unknown operation: '{
+            operation}' for property randomization. Please use 'add', 'abs' or 'scale'.")
     # set the mass into the physics simulation
     asset.root_physx_view.set_coms(coms, env_ids)

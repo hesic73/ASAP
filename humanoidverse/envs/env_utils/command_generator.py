@@ -3,6 +3,7 @@ import torch
 from humanoidverse.envs.env_utils.general import class_to_dict
 from humanoidverse.utils.torch_utils import torch_rand_float
 
+
 class CommandGenerator:
     def __init__(self, config, device, num_envs):
         self.config = config
@@ -18,9 +19,24 @@ class CommandGenerator:
         return self.commands[env_ids]
 
     def resample_commands(self, env_ids):
-        self.commands[env_ids, 0] = torch_rand_float(self.command_ranges["lin_vel_x"][0], self.command_ranges["lin_vel_x"][1], (len(env_ids), 1), device=str(self.device)).squeeze(1)
-        self.commands[env_ids, 1] = torch_rand_float(self.command_ranges["lin_vel_y"][0], self.command_ranges["lin_vel_y"][1], (len(env_ids), 1), device=str(self.device)).squeeze(1)
-        self.commands[env_ids, 2] = torch_rand_float(self.command_ranges["ang_vel_yaw"][0], self.command_ranges["ang_vel_yaw"][1], (len(env_ids), 1), device=str(self.device)).squeeze(1)
+        self.commands[env_ids,
+                      0] = torch_rand_float(self.command_ranges["lin_vel_x"][0],
+                                            self.command_ranges["lin_vel_x"][1],
+                                            (len(env_ids),
+                                             1),
+                                            device=str(self.device)).squeeze(1)
+        self.commands[env_ids,
+                      1] = torch_rand_float(self.command_ranges["lin_vel_y"][0],
+                                            self.command_ranges["lin_vel_y"][1],
+                                            (len(env_ids),
+                                             1),
+                                            device=str(self.device)).squeeze(1)
+        self.commands[env_ids,
+                      2] = torch_rand_float(self.command_ranges["ang_vel_yaw"][0],
+                                            self.command_ranges["ang_vel_yaw"][1],
+                                            (len(env_ids),
+                                             1),
+                                            device=str(self.device)).squeeze(1)
 
     def reset(self, env_ids):
         self.commands[env_ids] = torch.zeros(

@@ -14,7 +14,11 @@ import numpy as np
 
 
 def to_torch(x, dtype=torch.float, device='cuda:0', requires_grad=False):
-    return torch.tensor(x, dtype=dtype, device=device, requires_grad=requires_grad)
+    return torch.tensor(
+        x,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad)
 
 
 @torch.jit.script
@@ -95,7 +99,9 @@ def quat_unit(a: torch.Tensor) -> torch.Tensor:
 
 
 @torch.jit.script
-def quat_from_angle_axis(angle: torch.Tensor, axis: torch.Tensor) -> torch.Tensor:
+def quat_from_angle_axis(
+        angle: torch.Tensor,
+        axis: torch.Tensor) -> torch.Tensor:
     theta = (angle / 2).unsqueeze(-1)
     xyz = normalize(axis) * theta.sin()
     w = theta.cos()
@@ -108,13 +114,16 @@ def normalize_angle(x: torch.Tensor) -> torch.Tensor:
 
 
 @torch.jit.script
-def tf_inverse(q: torch.Tensor, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+def tf_inverse(q: torch.Tensor,
+               t: torch.Tensor) -> Tuple[torch.Tensor,
+                                         torch.Tensor]:
     q_inv = quat_conjugate(q)
     return q_inv, -quat_apply(q_inv, t)
 
 
 @torch.jit.script
-def tf_apply(q: torch.Tensor, t: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+def tf_apply(q: torch.Tensor, t: torch.Tensor,
+             v: torch.Tensor) -> torch.Tensor:
     return quat_apply(q, v) + t
 
 
@@ -124,7 +133,8 @@ def tf_vector(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
 
 
 @torch.jit.script
-def tf_combine(q1: torch.Tensor, t1: torch.Tensor, q2: torch.Tensor, t2: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+def tf_combine(q1: torch.Tensor, t1: torch.Tensor, q2: torch.Tensor,
+               t2: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     return quat_mul(q1, q2), quat_apply(q1, t2) + t1
 
 
@@ -151,7 +161,8 @@ def copysign(a: float, b: torch.Tensor) -> torch.Tensor:
 
 
 @torch.jit.script
-def get_euler_xyz(q: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def get_euler_xyz(
+        q: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     qx, qy, qz, qw = 0, 1, 2, 3
     # roll (x-axis rotation)
     sinr_cosp = 2.0 * (q[:, qw] * q[:, qx] + q[:, qy] * q[:, qz])
@@ -170,7 +181,7 @@ def get_euler_xyz(q: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Te
         q[:, qx] - q[:, qy] * q[:, qy] - q[:, qz] * q[:, qz]
     yaw = torch.atan2(siny_cosp, cosy_cosp)
 
-    return roll % (2*np.pi), pitch % (2*np.pi), yaw % (2*np.pi)
+    return roll % (2 * np.pi), pitch % (2 * np.pi), yaw % (2 * np.pi)
 
 
 @torch.jit.script
@@ -197,7 +208,10 @@ def get_euler_xyz_in_tensor(q: torch.Tensor) -> torch.Tensor:
 
 
 @torch.jit.script
-def quat_from_euler_xyz(roll: torch.Tensor, pitch: torch.Tensor, yaw: torch.Tensor) -> torch.Tensor:
+def quat_from_euler_xyz(
+        roll: torch.Tensor,
+        pitch: torch.Tensor,
+        yaw: torch.Tensor) -> torch.Tensor:
     cy = torch.cos(yaw * 0.5)
     sy = torch.sin(yaw * 0.5)
     cr = torch.cos(roll * 0.5)
@@ -214,7 +228,8 @@ def quat_from_euler_xyz(roll: torch.Tensor, pitch: torch.Tensor, yaw: torch.Tens
 
 
 @torch.jit.script
-def torch_rand_float(lower: float, upper: float, shape: Tuple[int, int], device: str) -> torch.Tensor:
+def torch_rand_float(lower: float, upper: float,
+                     shape: Tuple[int, int], device: str) -> torch.Tensor:
     return (upper - lower) * torch.rand(*shape, device=device) + lower
 
 

@@ -30,7 +30,10 @@ def quat_apply(a: torch.Tensor, b: torch.Tensor, w_last: bool) -> torch.Tensor:
 
 
 @torch.jit.script
-def quat_apply_yaw(quat: torch.Tensor, vec: torch.Tensor, w_last: bool) -> torch.Tensor:
+def quat_apply_yaw(
+        quat: torch.Tensor,
+        vec: torch.Tensor,
+        w_last: bool) -> torch.Tensor:
     quat_yaw = quat.clone().view(-1, 4)
     quat_yaw[:, :2] = 0.0
     quat_yaw = normalize(quat_yaw)
@@ -70,7 +73,10 @@ def quat_apply(a: torch.Tensor, b: torch.Tensor, w_last: bool) -> torch.Tensor:
 
 
 @torch.jit.script
-def quat_rotate(q: torch.Tensor, v: torch.Tensor, w_last: bool) -> torch.Tensor:
+def quat_rotate(
+        q: torch.Tensor,
+        v: torch.Tensor,
+        w_last: bool) -> torch.Tensor:
     shape = q.shape
     if w_last:
         q_w = q[:, -1]
@@ -89,7 +95,10 @@ def quat_rotate(q: torch.Tensor, v: torch.Tensor, w_last: bool) -> torch.Tensor:
 
 
 @torch.jit.script
-def quat_rotate_inverse(q: torch.Tensor, v: torch.Tensor, w_last: bool) -> torch.Tensor:
+def quat_rotate_inverse(
+        q: torch.Tensor,
+        v: torch.Tensor,
+        w_last: bool) -> torch.Tensor:
     shape = q.shape
     if w_last:
         q_w = q[:, -1]
@@ -108,7 +117,9 @@ def quat_rotate_inverse(q: torch.Tensor, v: torch.Tensor, w_last: bool) -> torch
 
 
 @torch.jit.script
-def quat_angle_axis(x: torch.Tensor, w_last: bool) -> Tuple[torch.Tensor, torch.Tensor]:
+def quat_angle_axis(x: torch.Tensor,
+                    w_last: bool) -> Tuple[torch.Tensor,
+                                           torch.Tensor]:
     """
     The (angle, axis) representation of the rotation. The axis is normalized to unit length.
     The angle is guaranteed to be between [0, pi].
@@ -126,7 +137,10 @@ def quat_angle_axis(x: torch.Tensor, w_last: bool) -> Tuple[torch.Tensor, torch.
 
 
 @torch.jit.script
-def quat_from_angle_axis(angle: torch.Tensor, axis: torch.Tensor, w_last: bool) -> torch.Tensor:
+def quat_from_angle_axis(
+        angle: torch.Tensor,
+        axis: torch.Tensor,
+        w_last: bool) -> torch.Tensor:
     theta = (angle / 2).unsqueeze(-1)
     xyz = normalize(axis) * theta.sin()
     w = theta.cos()
@@ -169,7 +183,10 @@ def normalize_angle(x: torch.Tensor) -> torch.Tensor:
 
 
 @torch.jit.script
-def get_basis_vector(q: torch.Tensor, v: torch.Tensor, w_last: bool) -> torch.Tensor:
+def get_basis_vector(
+        q: torch.Tensor,
+        v: torch.Tensor,
+        w_last: bool) -> torch.Tensor:
     return quat_rotate(q, v, w_last)
 
 
@@ -223,7 +240,9 @@ def slerp(q0: torch.Tensor, q1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
 
 
 @torch.jit.script
-def angle_axis_to_exp_map(angle: torch.Tensor, axis: torch.Tensor) -> torch.Tensor:
+def angle_axis_to_exp_map(
+        angle: torch.Tensor,
+        axis: torch.Tensor) -> torch.Tensor:
     # compute exponential map from axis-angle
     angle_expand = angle.unsqueeze(-1)
     exp_map = angle_expand * axis
@@ -301,7 +320,10 @@ def quat_inverse(x: torch.Tensor, w_last: bool) -> torch.Tensor:
 
 
 @torch.jit.script
-def get_euler_xyz(q: torch.Tensor, w_last: bool) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def get_euler_xyz(q: torch.Tensor,
+                  w_last: bool) -> Tuple[torch.Tensor,
+                                         torch.Tensor,
+                                         torch.Tensor]:
     if w_last:
         qx, qy, qz, qw = 0, 1, 2, 3
     else:
@@ -416,18 +438,24 @@ def quat_mul(a: torch.Tensor, b: torch.Tensor, w_last: bool) -> torch.Tensor:
 
 
 @torch.jit.script
-def quat_mul_norm(x: torch.Tensor, y: torch.Tensor, w_last: bool) -> torch.Tensor:
+def quat_mul_norm(
+        x: torch.Tensor,
+        y: torch.Tensor,
+        w_last: bool) -> torch.Tensor:
     """
-    Combine two set of 3D rotations together using \**\* operator. The shape needs to be
+    Combine two set of 3D rotations together using \\**\\* operator. The shape needs to be
     broadcastable
     """
     return quat_normalize(quat_mul(x, y, w_last))
 
 
 @torch.jit.script
-def quat_mul_norm(x: torch.Tensor, y: torch.Tensor, w_last: bool) -> torch.Tensor:
+def quat_mul_norm(
+        x: torch.Tensor,
+        y: torch.Tensor,
+        w_last: bool) -> torch.Tensor:
     """
-    Combine two set of 3D rotations together using \**\* operator. The shape needs to be
+    Combine two set of 3D rotations together using \\**\\* operator. The shape needs to be
     broadcastable
     """
     return quat_unit(quat_mul(x, y, w_last))
@@ -490,9 +518,10 @@ def transform_mul(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     return z
 
 
-##################################### FROM PHC rotation_conversions.py #####################################
+##################################### FROM PHC rotation_conversions.py ###
 @torch.jit.script
-def quaternion_to_matrix(quaternions: torch.torch.Tensor) -> torch.torch.Tensor:
+def quaternion_to_matrix(
+        quaternions: torch.torch.Tensor) -> torch.torch.Tensor:
     """
     Convert rotations given as quaternions to rotation matrices.
 
@@ -524,7 +553,8 @@ def quaternion_to_matrix(quaternions: torch.torch.Tensor) -> torch.torch.Tensor:
 
 
 @torch.jit.script
-def axis_angle_to_quaternion(axis_angle: torch.torch.Tensor) -> torch.torch.Tensor:
+def axis_angle_to_quaternion(
+        axis_angle: torch.torch.Tensor) -> torch.torch.Tensor:
     """
     Convert rotations given as axis/angle to quaternions.
 
@@ -637,7 +667,10 @@ def quat_w_first(rot: torch.Tensor) -> torch.Tensor:
 
 
 @torch.jit.script
-def quat_from_euler_xyz(roll: torch.Tensor, pitch: torch.Tensor, yaw: torch.Tensor) -> torch.Tensor:
+def quat_from_euler_xyz(
+        roll: torch.Tensor,
+        pitch: torch.Tensor,
+        yaw: torch.Tensor) -> torch.Tensor:
     cy = torch.cos(yaw * 0.5)
     sy = torch.sin(yaw * 0.5)
     cr = torch.cos(roll * 0.5)
