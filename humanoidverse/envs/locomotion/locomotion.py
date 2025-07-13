@@ -7,12 +7,11 @@ from humanoidverse.utils.torch_utils import *
 # from isaacgym import gymtorch, gymapi, gymutil
 
 import torch
-from torch import Tensor
 from typing import Tuple, Dict
 from rich.progress import Progress
 
 from humanoidverse.envs.env_utils.general import class_to_dict
-from isaac_utils.rotations import quat_apply_yaw, wrap_to_pi
+from humanoidverse.utils.torch_utils import wrap_to_pi
 from humanoidverse.envs.legged_base_task.legged_robot_base import LeggedRobotBase
 # from humanoidverse.envs.env_utils.command_generator import CommandGenerator
 from scipy.stats import vonmises

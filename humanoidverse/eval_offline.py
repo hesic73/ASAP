@@ -23,6 +23,7 @@ from loguru import logger
 
 @hydra.main(config_path="config", config_name="base_eval")
 def main(override_config: OmegaConf):
+    OmegaConf.resolve(override_config)
     # logging to hydra log file
     hydra_log_path = os.path.join(HydraConfig.get().runtime.output_dir, "eval.log")
     logger.remove()
@@ -108,9 +109,7 @@ def main(override_config: OmegaConf):
     else:
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-    eval_log_dir = Path(config.eval_log_dir)
-    eval_log_dir.mkdir(parents=True, exist_ok=True)
-
+    eval_log_dir = Path(HydraConfig.get().runtime.output_dir)
     logger.info(f"Saving eval logs to {eval_log_dir}")
     with open(eval_log_dir / "config.yaml", "w") as file:
         OmegaConf.save(config, file)

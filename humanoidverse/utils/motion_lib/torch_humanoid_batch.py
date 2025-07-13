@@ -7,7 +7,6 @@ from collections import defaultdict
 import numpy as np
 from isaac_utils.rotations import (
     quaternion_to_matrix,
-    wxyz_to_xyzw,
     axis_angle_to_quaternion,
     matrix_to_quaternion,
     quat_mul_norm,
@@ -16,6 +15,7 @@ from isaac_utils.rotations import (
     quat_angle_axis
 
 )
+from humanoidverse.utils.torch_utils import wxyz_to_xyzw
 from scipy.spatial.transform import Rotation as sRot
 import xml.etree.ElementTree as ETree
 from easydict import EasyDict

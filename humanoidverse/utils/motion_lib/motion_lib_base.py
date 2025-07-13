@@ -15,18 +15,7 @@ from rich.progress import track
 
 from typing import Optional, Sequence, Dict, Union, List, Any, Tuple
 
-from isaac_utils.rotations import (
-    quat_angle_axis,
-    quat_inverse,
-    quat_mul_norm,
-    get_euler_xyz,
-    normalize_angle,
-    slerp,
-    quat_to_exp_map,
-    quat_to_angle_axis,
-    quat_mul,
-    quat_conjugate,
-)
+from humanoidverse.utils.torch_utils import slerp
 
 
 def to_torch(tensor) -> torch.Tensor:
@@ -68,8 +57,8 @@ class MotionLibBase():
             motion_data = data[key]
             
             self._motion_data_cache.append({
-                'root_trans_offset': motion_data['root_trans_offset'],
-                'pose_aa': motion_data['pose_aa'],
+                'root_trans_offset': np.asarray(motion_data['root_trans_offset'], dtype=np.float32),
+                'pose_aa': np.asarray(motion_data['pose_aa'], dtype=np.float32),
                 'fps': motion_data['fps']
             })
 
