@@ -16,8 +16,10 @@ class RecordTrajectoryCallback(RL_EvalCallback):
 
     def on_pre_eval_env_step(self, actor_state: Dict[str, Any]) -> Dict[str, Any]:
         super().on_pre_eval_env_step(actor_state)
-        obs = actor_state["obs"]['actor_obs'].cpu().numpy()
-        self.observations.append(obs)
+        # NOTE (hsc): 因为PPO的evaluate_policy莫名在for loop外面额外调用了一次_pre_eval_env_step
+        if "step" in actor_state:
+            obs = actor_state["obs"]['actor_obs'].cpu().numpy()
+            self.observations.append(obs)
         return actor_state
 
     def on_post_eval_env_step(self, actor_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -38,6 +40,9 @@ class RecordTrajectoryCallback(RL_EvalCallback):
             "observations": np.array(self.observations),
             "actions": np.array(self.actions)
         }
+
+        assert len(trajectory_data["observations"]) == len(trajectory_data["actions"]), \
+            "Observations and actions must have the same length."
 
         # Save the trajectory data to a file
         np.savez(
