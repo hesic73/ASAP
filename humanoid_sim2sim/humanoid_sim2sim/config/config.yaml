@@ -1,10 +1,22 @@
 defaults:
   - _self_
-  - obs: motion_tracking
+  - robot: g1_29dof_anneal_23dof
+  - obs: deepmimic_a2c_nolinvel_LARGEnoise_history
 
-robot:
-  num_bodies: 24
-  dof_obs_size: 23
+policy_path: /home/sichenghe/25summer/ASAP/logs/MotionTracking/20250714_120154-ref_motion_phase_cr7-motion_tracking-g1_29dof_anneal_23dof/exported/model_0.onnx
+
+simulation_dt: 0.001
+
+video:
+  enabled: true
+  path: "my_video.mp4"
+  width: 960
+  height: 1280
+  camera_settings:
+    distance: 2.0
+    azimuth: 45.0 # degrees
+    elevation: -25.0 # degrees
+    lookat_body: "pelvis"
 
 hydra:
   job:
