@@ -58,6 +58,8 @@ AMASS/*
 
 *.txt
 *.stl
+*.sh
+!/scripts/bash/find_gpu.sh
 
 eval_g129dof_checkpoints
 _isaac_sim
