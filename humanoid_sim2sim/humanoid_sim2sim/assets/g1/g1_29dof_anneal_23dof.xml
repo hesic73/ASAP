@@ -266,8 +266,9 @@
   </actuator>
 
   <sensor>
-    <gyro name="imu-angular-velocity" site="imu" noise="5e-4" cutoff="34.9"/>
+    <gyro name="imu_gyro" site="imu" noise="5e-4" cutoff="34.9"/>
     <accelerometer name="imu-linear-acceleration" site="imu" noise="1e-2" cutoff="157"/>
+    <framequat name="imu_quat" objtype="site" objname="imu" />
   </sensor>
 
 
@@ -276,7 +277,7 @@
   <visual>
     <headlight diffuse="0.6 0.6 0.6" ambient="0.1 0.1 0.1" specular="0.9 0.9 0.9"/>
     <rgba haze="0.15 0.25 0.35 1"/>
-    <global azimuth="-140" elevation="-20"/>
+    <global azimuth="-140" elevation="-20" offwidth="1080" offheight="1920"/>
   </visual>
   <asset>
     <texture type="skybox" builtin="flat" rgb1="0 0 0" rgb2="0 0 0" width="512" height="3072"/>

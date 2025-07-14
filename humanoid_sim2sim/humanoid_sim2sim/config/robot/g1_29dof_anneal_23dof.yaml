@@ -3,6 +3,11 @@
 robot:
   num_bodies: 24
   dof_obs_size: 23
+  
+  # Joint and body names
+  floating_base_joint: "floating_base_joint"
+  base_link_name: "pelvis"
+  
   dof_names:
     [
       "left_hip_pitch_joint",

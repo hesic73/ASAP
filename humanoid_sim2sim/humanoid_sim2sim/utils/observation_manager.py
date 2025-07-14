@@ -64,11 +64,16 @@ class ObservationManager:
         # 仅当 last_timestep_obs 不为空时（即至少已经 update 过一次），才更新 history
         if self.last_timestep_obs:
             # 使用上一个时间步的数据来更新 history buffer
+            # 注意：history buffer存储的是scaled过的observation
             for key in self.history_keys:
                 if key in self.last_timestep_obs:
                     buffer = self.history_buffer[key]
                     buffer[1:] = buffer[:-1]
-                    buffer[0] = self.last_timestep_obs[key]
+                    # 应用scale后存储到history buffer
+                    raw_value = self.last_timestep_obs[key]
+                    scale = self.config.obs_scales[key]
+                    scaled_value = raw_value * scale
+                    buffer[0] = scaled_value
 
         # 存储当前时间步的观测值，供 get() 方法立即使用
         self.current_raw_obs = raw_obs
@@ -90,15 +95,17 @@ class ObservationManager:
                 history_component_parts = []
                 for hist_key in self.history_keys:
                     hist_len = self.history_spec[hist_key]
+                    # History buffer中已经存储了scaled过的observation
                     flat_history = self.history_buffer[hist_key][:hist_len].flatten(
                     )
                     history_component_parts.append(flat_history)
 
                 full_history_vec = np.concatenate(history_component_parts)
+                # 只对history整体应用history_actor的scale（通常是1.0）
                 scaled_history = full_history_vec * self.config.obs_scales.history_actor
                 obs_parts.append(scaled_history)
             else:
-                # 非历史部分总是使用最新的观测值
+                # 非历史部分总是使用最新的观测值并应用相应的scale
                 raw_value = self.current_raw_obs[key]
                 scale = self.config.obs_scales[key]
                 scaled_value = raw_value * scale

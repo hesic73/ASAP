@@ -56,7 +56,7 @@ class CameraManager:
             self.renderer.update_scene(data, camera=self.camera)
             self.frames.append(self.renderer.render())
 
-    def save_video(self, dt: float, decimation: int):
+    def save_video(self, fps: int):
         if not self.video_cfg.enabled:
             logger.info("Video recording disabled.")
             return
@@ -64,7 +64,6 @@ class CameraManager:
         if self.frames and self.renderer:
             output_video_path = Path(self.video_cfg.path)
             output_video_path.parent.mkdir(parents=True, exist_ok=True)
-            fps = int(1.0 / (dt * decimation))
             imageio.mimsave(output_video_path, self.frames, fps=fps)
             logger.info(
                 f"Video saved: {output_video_path} ({len(self.frames)} frames, {fps} FPS)")
