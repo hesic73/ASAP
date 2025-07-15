@@ -107,7 +107,7 @@ def initialize_robot_state(
     model: mujoco.MjModel,
     data: mujoco.MjData,
     robot_config: DictConfig,
-    floating_base_joint_name: str = "floating_base_joint"
+    floating_base_joint_name: str,
 ):
     """
     Initialize the robot to its default state based on the configuration.

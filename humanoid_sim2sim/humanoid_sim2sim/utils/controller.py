@@ -131,10 +131,8 @@ class LowLevelPDController:
             elif 'elbow' in joint_name:
                 gains[i] = gain_config.elbow
             else:
-                # Default gain if no pattern matches
-                gains[i] = 50.0
-                print(
-                    f"Warning: No gain found for joint {joint_name}, using default value 50.0")
+                raise ValueError(
+                    f"Unknown joint name '{joint_name}' in gain configuration")
 
         return gains
 

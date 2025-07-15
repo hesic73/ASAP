@@ -46,11 +46,11 @@ def get_proprio(
     joint_vel = np.array([full_qvel[idx]
                          for idx in mj_qvel_indices], dtype=np.double)
 
-    quat_mj_wxyz = data.sensor("imu_quat").data
+    quat_mj_wxyz = data.sensor("orientation").data
     quat_scipy_xyzw = quat_mj_wxyz[[1, 2, 3, 0]].astype(np.double)
     base_rotation = R.from_quat(quat_scipy_xyzw)
 
-    base_ang_vel = data.sensor("imu_gyro").data.astype(
+    base_ang_vel = data.sensor("imu-angular-velocity").data.astype(
         np.double).copy()  # rad/s
 
     gravity_vector_world = np.array([0.0, 0.0, -1.0], dtype=np.double)
@@ -64,14 +64,24 @@ def get_proprio_observations(
     data: mujoco.MjData,
     mj_qpos_indices: np.ndarray,
     mj_qvel_indices: np.ndarray,
-    last_action: np.ndarray
+    last_action: np.ndarray,
+    initial_joint_pos: np.ndarray
 ) -> dict:
     """
     Extract proprioceptive observations from MuJoCo data.
+
+    Args:
+        data: MuJoCo data
+        mj_qpos_indices: Joint position indices
+        mj_qvel_indices: Joint velocity indices  
+        last_action: Previous action
+        initial_joint_pos: Initial joint positions to subtract (for relative positions)
     """
     joint_pos, joint_vel, base_ang_vel, projected_gravity = get_proprio(
         data, mj_qpos_indices, mj_qvel_indices
     )
+
+    joint_pos = joint_pos - initial_joint_pos
 
     return {
         "dof_pos": joint_pos.astype(np.float32),
@@ -120,6 +130,12 @@ def main(cfg: DictConfig) -> None:
     initialize_robot_state(model, data, cfg.robot, floating_base_joint_name)
     mujoco.mj_forward(model, data)
 
+    # Get initial joint positions from config for relative position observations
+    default_joint_angles = cfg.robot.init_state.default_joint_angles
+    initial_joint_pos = np.array([
+        default_joint_angles.get(joint_name, 0.0) for joint_name in dof_names
+    ], dtype=np.float64)
+
     # Initialize PD controller
     pd_controller = LowLevelPDController(model, cfg.robot, control_delay=0)
 
@@ -142,16 +158,13 @@ def main(cfg: DictConfig) -> None:
 
     # Simulation parameters from config
     total_time = cfg.total_time
-    policy_dt = cfg.policy_dt
+    control_decimation = cfg.control_decimation
     motion_length = cfg.motion_length
-    simulation_steps_per_policy_step = int(policy_dt / simulation_dt)
-    total_policy_steps = int(total_time / policy_dt)
+    total_policy_steps = int(total_time / simulation_dt / control_decimation)
 
     logger.info(f"Running simulation for {total_time}s")
-    logger.info(f"Policy frequency: {1/policy_dt}Hz")
+    logger.info(f"Policy frequency: {1/simulation_dt/control_decimation}Hz")
     logger.info(f"Motion cycle length: {motion_length}s")
-    logger.info(
-        f"Sim steps per policy step: {simulation_steps_per_policy_step}")
 
     # Simulation variables
     last_action = np.zeros(len(dof_names), dtype=np.float32)
@@ -166,9 +179,13 @@ def main(cfg: DictConfig) -> None:
 
         # Get proprioceptive observations
         obs_dict = get_proprio_observations(
-            data, mj_qpos_indices, mj_qvel_indices, last_action
+            data, mj_qpos_indices, mj_qvel_indices, last_action, initial_joint_pos
         )
         obs_dict["ref_motion_phase"] = ref_motion_phase
+
+        # for obs_name, obs_value in obs_dict.items():
+        #     print(obs_name, obs_value)
+        # exit()
 
         # Update observation manager
         obs_manager.update(obs_dict)
@@ -179,9 +196,11 @@ def main(cfg: DictConfig) -> None:
         policy_input = {policy.get_inputs()[0].name: full_obs[np.newaxis, :]}
         action = policy.run(["action"], policy_input)[0]
         action = action.flatten().astype(np.float32)
+        action_clip_value = cfg.robot.control.action_clip_value
+        action = np.clip(action, -action_clip_value, action_clip_value)
 
-        # Apply control for multiple simulation steps (simulation_dt vs policy_dt)
-        for _ in range(simulation_steps_per_policy_step):
+        # Apply control for multiple simulation steps
+        for _ in range(control_decimation):
             pd_controller.apply_control(action, data)
             mujoco.mj_step(model, data)
             step += 1
@@ -195,7 +214,9 @@ def main(cfg: DictConfig) -> None:
 
     # Save video if enabled
     if camera_manager is not None:
-        camera_manager.save_video(fps=int(1.0/policy_dt))
+        logger.info("Saving video...")
+        camera_manager.save_video(
+            fps=int(1 / simulation_dt / control_decimation))
         camera_manager.close()
         logger.info(f"Video saved to: {cfg.video.path}")
 

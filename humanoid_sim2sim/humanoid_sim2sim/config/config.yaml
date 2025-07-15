@@ -6,10 +6,10 @@ defaults:
 policy_path: null
 
 simulation_dt: 0.001
+control_decimation: 20
 
 # Simulation parameters
 total_time: 10.0  # Total simulation time in seconds
-policy_dt: 0.02   # Policy frequency (50Hz)
 motion_length: 3.933  # Motion cycle length in seconds
 
 video:

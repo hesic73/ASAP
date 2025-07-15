@@ -1,6 +1,8 @@
 <mujoco model="g1_29dof_anneal_23dof">
   <compiler angle="radian" meshdir="meshes" />
-
+  <default>
+    <joint damping="0.52" armature=" 0.12" frictionloss="0.65" />
+  </default>
   <asset>
     <mesh name="pelvis" file="pelvis.STL" />
     <mesh name="pelvis_contour_link" file="pelvis_contour_link.STL" />
@@ -395,11 +397,10 @@
   </actuator>
 
   <sensor>
-    <gyro name="imu_gyro" site="imu" noise="5e-4" cutoff="34.9" />
+    <framequat name='orientation' objtype='site' noise='0.001' objname='imu' />
+    <gyro name="imu-angular-velocity" site="imu" noise="5e-4" cutoff="34.9" />
     <accelerometer name="imu-linear-acceleration" site="imu" noise="1e-2" cutoff="157" />
-    <framequat name="imu_quat" objtype="site" objname="imu" />
   </sensor>
-
 
   <!-- setup scene -->
   <statistic center="1.0 0.7 1.0" extent="0.8" />
