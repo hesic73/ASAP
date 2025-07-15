@@ -67,6 +67,8 @@ def get_observations(
     last_action: np.ndarray,
     initial_joint_pos: np.ndarray,
     counter: int,
+    simulation_dt: float,
+    motion_length: float,
 ) -> dict:
     joint_pos, joint_vel, base_ang_vel, projected_gravity = get_proprio(
         data, mj_qpos_indices, mj_qvel_indices
@@ -74,7 +76,9 @@ def get_observations(
 
     joint_pos = joint_pos - initial_joint_pos
 
-    ref_motion_phase = np.array([counter], dtype=np.float32)
+    ref_motion_phase = (counter + 1) * simulation_dt / motion_length
+    ref_motion_phase = np.clip(ref_motion_phase, 0, 1)
+    ref_motion_phase = np.array([ref_motion_phase], dtype=np.float32)
 
     return {
         "dof_pos": joint_pos.astype(np.float32),
@@ -182,6 +186,8 @@ def main(cfg: DictConfig) -> None:
                 last_action,
                 initial_joint_pos,
                 step,
+                simulation_dt,
+                motion_length,
             )
             obs_manager.update(obs_dict)
 
