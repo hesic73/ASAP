@@ -18,6 +18,7 @@ from humanoidverse.envs.env_utils.history_handler import HistoryHandler
 from termcolor import colored
 from humanoidverse.utils.helpers import parse_observation
 from humanoidverse.envs.env_utils.visualization import Point
+from humanoidverse.utils.torch_utils import sample_uniform
 
 from loguru import logger
 import copy
@@ -115,8 +116,8 @@ class LeggedRobotBase(BaseTask):
 
     def _domain_rand_config(self):
         if self.config.domain_rand.push_robots:
-            self.push_interval_s = torch.randint(
-                self.config.domain_rand.push_interval_s[0], self.config.domain_rand.push_interval_s[1], (self.num_envs,), device=self.device)
+            self.push_interval_s = sample_uniform(
+                self.config.domain_rand.push_interval_s[0], self.config.domain_rand.push_interval_s[1], (self.num_envs,), self.device)
 
     def _init_counters(self):
         self.common_step_counter = 0
@@ -357,8 +358,8 @@ class LeggedRobotBase(BaseTask):
                 self.push_interval_s / self.dt).int()).nonzero(as_tuple=False).flatten()
             self.push_robot_counter[push_robot_env_ids] = 0
             self.push_robot_plot_counter[push_robot_env_ids] = 0
-            self.push_interval_s[push_robot_env_ids] = torch.randint(self.config.domain_rand.push_interval_s[0], self.config.domain_rand.push_interval_s[1], (len(
-                push_robot_env_ids),), device=self.device, requires_grad=False)
+            self.push_interval_s[push_robot_env_ids] = sample_uniform(self.config.domain_rand.push_interval_s[0], self.config.domain_rand.push_interval_s[1], (len(
+                push_robot_env_ids),), self.device)
             self._push_robots(push_robot_env_ids)
 
     def _post_compute_observations_callback(self):

@@ -153,12 +153,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
 
     def _init_buffers(self):
         super()._init_buffers()
-        self.vr_3point_marker_coords = torch.zeros(
-            self.num_envs, 3, 3, dtype=torch.float, device=self.device, requires_grad=False)
-        self.realtime_vr_keypoints_pos = torch.zeros(
-            3, 3, dtype=torch.float, device=self.device, requires_grad=False)  # hand, hand, head
-        self.realtime_vr_keypoints_vel = torch.zeros(
-            3, 3, dtype=torch.float, device=self.device, requires_grad=False)  # hand, hand, head
         self.motion_ids = torch.arange(self.num_envs).to(self.device)
         self.motion_start_times = torch.zeros(
             self.num_envs, dtype=torch.float32, device=self.device, requires_grad=False)
@@ -167,8 +161,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
 
     def _init_domain_rand_buffers(self):
         super()._init_domain_rand_buffers()
-        self.ref_episodic_offset = torch.zeros(
-            self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False)
 
     def _reset_tasks_callback(self, env_ids):
         if len(env_ids) == 0:

@@ -11,6 +11,7 @@ license agreement from NVIDIA CORPORATION is strictly prohibited.
 from typing import Tuple
 import torch
 import numpy as np
+from typing import Sequence
 
 
 def to_torch(x, dtype=torch.float, device='cuda:0', requires_grad=False):
@@ -276,3 +277,7 @@ def wxyz_to_xyzw(quat: torch.Tensor) -> torch.Tensor:
 
 def xyzw_to_wxyz(quat: torch.Tensor) -> torch.Tensor:
     return quat[..., [3, 0, 1, 2]]
+
+
+def sample_uniform(low, high, shape: Sequence[int], device: torch.device) -> torch.Tensor:
+    return (high - low) * torch.rand(*shape, device=device) + low
