@@ -207,10 +207,13 @@ class MotionLibBase():
         logger.info(
             f"Sampling motion indices: {sample_idxes[:5].cpu().numpy()}, ....")
 
+        unique_sample_idxes, inverse_indices = torch.unique(
+            sample_idxes, return_inverse=True)
         sampled_motion_data = [self._motion_data_cache[i]
-                               for i in sample_idxes.cpu().numpy()]
+                               for i in unique_sample_idxes.cpu().numpy()]
 
-        for curr_file_data in track(sampled_motion_data, description="Processing motions..."):
+        processed_motions = []
+        for curr_file_data in track(sampled_motion_data, description="Processing unique motions..."):
             seq_len = curr_file_data['root_trans_offset'].shape[0]
             if max_len == -1 or seq_len < max_len:
                 start, end = 0, seq_len
@@ -234,17 +237,21 @@ class MotionLibBase():
                 logger.error("No mesh parser found")
                 # Handle case where fk is not possible
                 continue
+            processed_motions.append(curr_motion)
 
+        for i in inverse_indices:
+            curr_motion = processed_motions[i]
             num_frames = curr_motion.global_rotation.shape[0]
+            # dt is based on the last processed motion, should be fine for now as it's per unique motion
             curr_len = dt * (num_frames - 1)
 
+            # motion_fps is based on the last processed motion, should be fine
             _motion_fps.append(motion_fps)
+            # dt is based on the last processed motion, should be fine
             _motion_dt.append(dt)
             _motion_num_frames.append(num_frames)
             motions.append(curr_motion)
             _motion_lengths.append(curr_len)
-
-            del curr_motion
 
         self._motion_lengths = torch.tensor(
             _motion_lengths, device=self._device, dtype=torch.float32)
