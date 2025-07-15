@@ -131,5 +131,20 @@ robot:
     action_clip_value: 100.0
     clip_torques: True
 
+    torque_limits:
+      hip_yaw: 88.0
+      hip_roll: 88.0
+      hip_pitch: 88.0
+      knee: 139.0
+      ankle_pitch: 50.0
+      ankle_roll: 50.0
+      waist_yaw: 88.0
+      waist_roll: 50.0
+      waist_pitch: 50.0
+      shoulder_pitch: 25.0
+      shoulder_roll: 25.0
+      shoulder_yaw: 25.0
+      elbow: 25.0
+
   asset:
     xml_path: "g1/g1_29dof_anneal_23dof.xml"

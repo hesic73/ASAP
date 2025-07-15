@@ -3,14 +3,14 @@ defaults:
   - robot: g1_29dof_anneal_23dof
   - obs: deepmimic_a2c_nolinvel_LARGEnoise_history
 
-policy_path: /home/sichenghe/25summer/ASAP/logs/MotionTracking/20250714_120154-ref_motion_phase_cr7-motion_tracking-g1_29dof_anneal_23dof/exported/model_1000.onnx
+policy_path: null
 
 simulation_dt: 0.001
 
 # Simulation parameters
 total_time: 10.0  # Total simulation time in seconds
 policy_dt: 0.02   # Policy frequency (50Hz)
-motion_length: 3.9333  # Motion cycle length in seconds
+motion_length: 3.97  # Motion cycle length in seconds
 
 video:
   enabled: true

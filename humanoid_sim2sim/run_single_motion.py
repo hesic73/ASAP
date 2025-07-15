@@ -137,8 +137,8 @@ def main(cfg: DictConfig) -> None:
         camera_manager = CameraManager(model, data, cfg.video)
         print("Video recording enabled")
 
-    # Get base link name from config (with fallback)
-    base_link_name = getattr(cfg.robot, 'base_link_name', 'pelvis')
+    # Get base link name from config
+    base_link_name = cfg.robot.base_link_name
 
     # Simulation parameters from config
     total_time = cfg.total_time
@@ -153,16 +153,15 @@ def main(cfg: DictConfig) -> None:
     print(f"Sim steps per policy step: {simulation_steps_per_policy_step}")
 
     # Simulation variables
-    step = 0
-    policy_step = 0
     last_action = np.zeros(len(dof_names), dtype=np.float32)
 
+    step: int = 0
     for policy_step in track(range(total_policy_steps), description="Running simulation..."):
-        current_time = step * simulation_dt
-
         # Calculate motion phase (0-1 cycle)
         ref_motion_phase = np.array(
-            [(current_time % motion_length) / motion_length], dtype=np.float32)
+            [((step + 1) * simulation_dt) / motion_length], dtype=np.float32)
+
+        ref_motion_phase = np.clip(ref_motion_phase, 0.0, 1.0)
 
         # Get proprioceptive observations
         obs_dict = get_proprio_observations(

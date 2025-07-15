@@ -2,6 +2,9 @@ import mujoco
 import numpy as np
 from typing import Dict
 from omegaconf import DictConfig
+
+from loguru import logger
+
 from .mujoco_utils import get_ordered_joint_indices, pd_control
 
 
@@ -69,20 +72,20 @@ class LowLevelPDController:
         self.kps = self._extract_gains(control_config.stiffness, dof_names)
         self.kds = self._extract_gains(control_config.damping, dof_names)
 
-        # Extract torque limits if available
-        if hasattr(control_config, 'torque_limits'):
-            self.tau_limits = self._extract_gains(
-                control_config.torque_limits, dof_names)
-        else:
-            # Use a default large value if no torque limits specified
-            self.tau_limits = np.full(
-                self.num_joints, control_config.get('action_clip_value', 100.0))
+        # Extract torque limits and convert to numpy arrays
+        self.tau_limits = self._extract_gains(
+            control_config.torque_limits, dof_names)
 
         # Get initial joint positions for target calculation
         default_joint_angles = robot_config.init_state.default_joint_angles
         self.initial_qpos = np.array([
             default_joint_angles.get(joint_name, 0.0) for joint_name in dof_names
         ], dtype=np.float64)
+
+        logger.info(f"KP gains: {self.kps}")
+        logger.info(f"KD gains: {self.kds}")
+        logger.info(f"Torque limits: {self.tau_limits}")
+        logger.info(f"Initial joint positions: {self.initial_qpos}")
 
         # Initialize action delay buffer
         self.action_to_apply_buffer = CircularBuffer(
