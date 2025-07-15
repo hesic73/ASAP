@@ -60,35 +60,29 @@ def get_proprio(
     return joint_pos, joint_vel, base_ang_vel, projected_gravity
 
 
-def get_proprio_observations(
+def get_observations(
     data: mujoco.MjData,
     mj_qpos_indices: np.ndarray,
     mj_qvel_indices: np.ndarray,
     last_action: np.ndarray,
-    initial_joint_pos: np.ndarray
+    initial_joint_pos: np.ndarray,
+    counter: int,
 ) -> dict:
-    """
-    Extract proprioceptive observations from MuJoCo data.
-
-    Args:
-        data: MuJoCo data
-        mj_qpos_indices: Joint position indices
-        mj_qvel_indices: Joint velocity indices  
-        last_action: Previous action
-        initial_joint_pos: Initial joint positions to subtract (for relative positions)
-    """
     joint_pos, joint_vel, base_ang_vel, projected_gravity = get_proprio(
         data, mj_qpos_indices, mj_qvel_indices
     )
 
     joint_pos = joint_pos - initial_joint_pos
 
+    ref_motion_phase = np.array([counter], dtype=np.float32)
+
     return {
         "dof_pos": joint_pos.astype(np.float32),
         "dof_vel": joint_vel.astype(np.float32),
         "base_ang_vel": base_ang_vel.astype(np.float32),
         "projected_gravity": projected_gravity.astype(np.float32),
-        "actions": last_action.astype(np.float32)
+        "actions": last_action.astype(np.float32),
+        "ref_motion_phase": ref_motion_phase,
     }
 
 
@@ -115,6 +109,9 @@ def main(cfg: DictConfig) -> None:
     mj_qpos_indices, mj_qvel_indices, mj_actuator_indices = get_ordered_joint_indices(
         model, dof_names
     )
+    logger.info(f"qpos indices: {mj_qpos_indices}")
+    logger.info(f"qvel indices: {mj_qvel_indices}")
+    logger.info(f"actuator indices: {mj_actuator_indices}")
 
     # Convert to numpy arrays for get_proprio function
     mj_qpos_indices = np.array(mj_qpos_indices)
@@ -135,9 +132,10 @@ def main(cfg: DictConfig) -> None:
     initial_joint_pos = np.array([
         default_joint_angles.get(joint_name, 0.0) for joint_name in dof_names
     ], dtype=np.float64)
+    action_scale = cfg.robot.control.action_scale
 
     # Initialize PD controller
-    pd_controller = LowLevelPDController(model, cfg.robot, control_delay=0)
+    pd_controller = LowLevelPDController(model, cfg.robot)
 
     # Load ONNX policy
     onnx_model_path = cfg.policy_path
@@ -168,49 +166,40 @@ def main(cfg: DictConfig) -> None:
 
     # Simulation variables
     last_action = np.zeros(len(dof_names), dtype=np.float32)
+    target_dof_pos = np.zeros(len(dof_names), dtype=np.float32)
 
     step: int = 0
-    for policy_step in track(range(total_policy_steps), description="Running simulation..."):
-        # Calculate motion phase (0-1 cycle)
-        ref_motion_phase = np.array(
-            [((step + 1) * simulation_dt) / motion_length], dtype=np.float32)
 
-        ref_motion_phase = np.clip(ref_motion_phase, 0.0, 1.0)
+    for _ in track(range(int(total_time / simulation_dt)), description="Running simulation..."):
+        pd_controller.apply_control(target_dof_pos, data)
+        mujoco.mj_step(model, data)
+        step += 1
+        if step % control_decimation == 0:
+            obs_dict = get_observations(
+                data,
+                mj_qpos_indices,
+                mj_qvel_indices,
+                last_action,
+                initial_joint_pos,
+                step,
+            )
+            obs_manager.update(obs_dict)
 
-        # Get proprioceptive observations
-        obs_dict = get_proprio_observations(
-            data, mj_qpos_indices, mj_qvel_indices, last_action, initial_joint_pos
-        )
-        obs_dict["ref_motion_phase"] = ref_motion_phase
+            full_obs = obs_manager.get()  # (n_obs,)
 
-        # for obs_name, obs_value in obs_dict.items():
-        #     print(obs_name, obs_value)
-        # exit()
+            policy_input = {
+                policy.get_inputs()[0].name: full_obs[np.newaxis, :]}
+            action = policy.run(["action"], policy_input)[0]
+            action = action.flatten().astype(np.float32)
+            action_clip_value = cfg.robot.control.action_clip_value
+            action = np.clip(action, -action_clip_value, action_clip_value)
 
-        # Update observation manager
-        obs_manager.update(obs_dict)
+            target_dof_pos = action * action_scale + initial_joint_pos
 
-        # Get full observation vector
-        full_obs = obs_manager.get()  # (n_obs,)
-
-        policy_input = {policy.get_inputs()[0].name: full_obs[np.newaxis, :]}
-        action = policy.run(["action"], policy_input)[0]
-        action = action.flatten().astype(np.float32)
-        action_clip_value = cfg.robot.control.action_clip_value
-        action = np.clip(action, -action_clip_value, action_clip_value)
-
-        # Apply control for multiple simulation steps
-        for _ in range(control_decimation):
-            pd_controller.apply_control(action, data)
-            mujoco.mj_step(model, data)
-            step += 1
-
-        # Render frame if video enabled
-        if camera_manager is not None:
-            camera_manager.render_frame(data)
-
-        # Update for next iteration
-        last_action = action.copy()
+            last_action = action.copy()
+            # Render frame if video enabled
+            if camera_manager is not None:
+                camera_manager.render_frame(data)
 
     # Save video if enabled
     if camera_manager is not None:
