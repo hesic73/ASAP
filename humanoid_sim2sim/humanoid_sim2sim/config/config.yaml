@@ -10,7 +10,7 @@ simulation_dt: 0.001
 # Simulation parameters
 total_time: 10.0  # Total simulation time in seconds
 policy_dt: 0.02   # Policy frequency (50Hz)
-motion_length: 3.97  # Motion cycle length in seconds
+motion_length: 3.933  # Motion cycle length in seconds
 
 video:
   enabled: true

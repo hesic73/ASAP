@@ -174,11 +174,9 @@ def main(cfg: DictConfig) -> None:
         obs_manager.update(obs_dict)
 
         # Get full observation vector
-        full_obs = obs_manager.get()
+        full_obs = obs_manager.get()  # (n_obs,)
 
-        # Run policy inference
-        obs_buff = full_obs.reshape(1, -1).astype(np.float32)
-        policy_input = {policy.get_inputs()[0].name: obs_buff}
+        policy_input = {policy.get_inputs()[0].name: full_obs[np.newaxis, :]}
         action = policy.run(["action"], policy_input)[0]
         action = action.flatten().astype(np.float32)
 
