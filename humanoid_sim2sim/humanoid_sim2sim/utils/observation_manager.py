@@ -111,4 +111,7 @@ class ObservationManager:
                 scaled_value = raw_value * scale
                 obs_parts.append(scaled_value)
 
-        return np.concatenate(obs_parts).astype(np.float32)
+        full_obs = np.concatenate(obs_parts).astype(np.float32)
+        full_obs = np.clip(full_obs, -self.config.clip_obs,
+                           self.config.clip_obs)
+        return full_obs

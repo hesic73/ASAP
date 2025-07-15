@@ -47,11 +47,11 @@ def get_proprio(
     joint_vel = np.array([full_qvel[idx]
                          for idx in mj_qvel_indices], dtype=np.double)
 
-    quat_mj_wxyz = data.sensor("orientation").data
+    quat_mj_wxyz = data.sensor("imu_quat").data
     quat_scipy_xyzw = quat_mj_wxyz[[1, 2, 3, 0]].astype(np.double)
     base_rotation = R.from_quat(quat_scipy_xyzw)
 
-    base_ang_vel = data.sensor("imu-angular-velocity").data.astype(
+    base_ang_vel = data.sensor("imu_gyro").data.astype(
         np.double).copy()  # rad/s
 
     gravity_vector_world = np.array([0.0, 0.0, -1.0], dtype=np.double)
@@ -171,7 +171,7 @@ def main(cfg: DictConfig) -> None:
 
     # Simulation variables
     last_action = np.zeros(len(dof_names), dtype=np.float32)
-    target_dof_pos = np.zeros(len(dof_names), dtype=np.float32)
+    target_dof_pos = initial_joint_pos
 
     step: int = 0
 
