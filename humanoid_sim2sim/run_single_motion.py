@@ -22,6 +22,7 @@ from humanoid_sim2sim.utils.mujoco_utils import (
 )
 from humanoid_sim2sim.utils.controller import LowLevelPDController
 
+from humanoid_sim2sim.utils.debug_utils import print_actor_obs_v2
 
 from humanoid_sim2sim.consts import CONFIG_DIR, ASSETS_DIR
 

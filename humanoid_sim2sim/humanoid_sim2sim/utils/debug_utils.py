@@ -1,9 +1,6 @@
 import numpy as np
-import tyro
 from rich.console import Console
 from rich.text import Text
-from dataclasses import dataclass
-
 
 # Initialize Rich Console for styled output
 console = Console()
@@ -111,44 +108,3 @@ def print_actor_obs_v2(obs: np.ndarray):
         console.print(
             f"[orange3]Warning: Not all observation components were parsed. Remaining elements: {len(obs) - current_idx}[/orange3]")
     console.print("--- [bold magenta]End Parsing (v2)[/bold magenta] ---")
-
-@dataclass
-class Args:
-    """
-    Configuration for the observation parsing script.
-    """
-    filename: str
-    """Path to the eval_trajectory.npz file."""
-
-
-def main():
-    args = tyro.cli(Args)  # Parse arguments from the command line
-
-    try:
-        data = np.load(args.filename)
-        observations = data['observations']
-        actions = data['actions']
-        console.print(
-            f"[bold]Observations shape:[/bold] [green]{observations.shape}[/green]")
-        console.print(
-            f"[bold]Actions shape:[/bold] [green]{actions.shape}[/green]")
-
-        # Example usage: Print the first observation from the first trajectory
-        if observations.shape[0] > 0 and observations.shape[1] > 0:
-            console.print(
-                "\n[bold]--- Details for the First Actor Observation ---[/bold]")
-            first_obs = observations[0, 0, :]
-            print_actor_obs_v2(first_obs)  # Use the new parsing function
-        else:
-            console.print(
-                "[orange3]No observations available in the loaded data.[/orange3]")
-
-    except FileNotFoundError:
-        console.print(
-            f"[red]Error: The file '{args.filename}' was not found. Please check the path.[/red]")
-    except Exception as e:
-        console.print(f"[red]An unexpected error occurred: {e}[/red]")
-
-
-if __name__ == "__main__":
-    main()
