@@ -95,10 +95,10 @@ def main(cfg: DictConfig) -> None:
     simulation_dt: float = cfg.simulation_dt
     model.opt.timestep = simulation_dt
 
-    print(f"Loaded model: {cfg.robot.asset.xml_path}")
-    print(f"Simulation dt: {simulation_dt}")
-    print(f"Number of joints: {model.njnt}")
-    print(f"Number of actuators: {model.nu}")
+    logger.info(f"Loaded model: {cfg.robot.asset.xml_path}")
+    logger.info(f"Simulation dt: {simulation_dt}")
+    logger.info(f"Number of joints: {model.njnt}")
+    logger.info(f"Number of actuators: {model.nu}")
 
     # Get joint indices for policy
     dof_names = cfg.robot.dof_names
@@ -110,7 +110,7 @@ def main(cfg: DictConfig) -> None:
     mj_qpos_indices = np.array(mj_qpos_indices)
     mj_qvel_indices = np.array(mj_qvel_indices)
 
-    print(f"Policy controls {len(dof_names)} joints")
+    logger.info(f"Policy controls {len(dof_names)} joints")
 
     # Get floating base joint name from config (with fallback)
     floating_base_joint_name = getattr(
@@ -126,7 +126,7 @@ def main(cfg: DictConfig) -> None:
     # Load ONNX policy
     onnx_model_path = cfg.policy_path
     policy = onnxruntime.InferenceSession(onnx_model_path)
-    print(f"Loaded ONNX policy from: {onnx_model_path}")
+    logger.info(f"Loaded ONNX policy from: {onnx_model_path}")
 
     # Initialize observation manager
     obs_manager = ObservationManager(cfg.obs)
@@ -135,7 +135,7 @@ def main(cfg: DictConfig) -> None:
     camera_manager = None
     if cfg.video.enabled:
         camera_manager = CameraManager(model, data, cfg.video)
-        print("Video recording enabled")
+        logger.info("Video recording enabled")
 
     # Get base link name from config
     base_link_name = cfg.robot.base_link_name
@@ -147,10 +147,11 @@ def main(cfg: DictConfig) -> None:
     simulation_steps_per_policy_step = int(policy_dt / simulation_dt)
     total_policy_steps = int(total_time / policy_dt)
 
-    print(f"Running simulation for {total_time}s")
-    print(f"Policy frequency: {1/policy_dt}Hz")
-    print(f"Motion cycle length: {motion_length}s")
-    print(f"Sim steps per policy step: {simulation_steps_per_policy_step}")
+    logger.info(f"Running simulation for {total_time}s")
+    logger.info(f"Policy frequency: {1/policy_dt}Hz")
+    logger.info(f"Motion cycle length: {motion_length}s")
+    logger.info(
+        f"Sim steps per policy step: {simulation_steps_per_policy_step}")
 
     # Simulation variables
     last_action = np.zeros(len(dof_names), dtype=np.float32)
@@ -198,9 +199,9 @@ def main(cfg: DictConfig) -> None:
     if camera_manager is not None:
         camera_manager.save_video(fps=int(1.0/policy_dt))
         camera_manager.close()
-        print(f"Video saved to: {cfg.video.path}")
+        logger.info(f"Video saved to: {cfg.video.path}")
 
-    print("Simulation completed!")
+    logger.info("Simulation completed!")
 
 
 if __name__ == "__main__":
