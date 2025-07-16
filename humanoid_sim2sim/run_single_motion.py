@@ -163,7 +163,6 @@ def main(cfg: DictConfig) -> None:
     total_time = cfg.total_time
     control_decimation = cfg.control_decimation
     motion_length = cfg.motion_length
-    total_policy_steps = int(total_time / simulation_dt / control_decimation)
 
     logger.info(f"Running simulation for {total_time}s")
     logger.info(f"Policy frequency: {1/simulation_dt/control_decimation}Hz")

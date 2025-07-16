@@ -13,7 +13,7 @@ env:
       terminate_by_gravity: True
       terminate_by_low_height: False
       terminate_when_motion_end: True
-      terminate_when_motion_far: False
+      terminate_when_motion_far: True
       terminate_when_close_to_dof_pos_limit: False
       terminate_when_close_to_dof_vel_limit: False
       terminate_when_close_to_torque_limit: False
@@ -30,10 +30,10 @@ env:
       terminate_when_close_to_dof_vel_limit: 0.25
       terminate_when_close_to_torque_limit: 0.25
     termination_curriculum:
-      terminate_when_motion_far_curriculum: False
+      terminate_when_motion_far_curriculum: True
       terminate_when_motion_far_initial_threshold: 1.5
       terminate_when_motion_far_threshold_max: 2.0
-      terminate_when_motion_far_threshold_min: 0.25
+      terminate_when_motion_far_threshold_min: 0.3
       terminate_when_motion_far_curriculum_degree: 0.0000025
       terminate_when_motion_far_curriculum_level_down_threshold: 40
       terminate_when_motion_far_curriculum_level_up_threshold: 42

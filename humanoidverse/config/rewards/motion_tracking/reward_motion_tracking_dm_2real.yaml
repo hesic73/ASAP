@@ -57,13 +57,13 @@ rewards:
   # locomotion_max_contact_force: 200.0
   # desired_feet_max_height_for_this_air: 0.2
 
-  reward_penalty_curriculum: False
+  reward_penalty_curriculum: True
   reward_initial_penalty_scale : 0.10
   reward_min_penalty_scale: 0.0
   reward_max_penalty_scale: 1.0
   reward_penalty_level_down_threshold: 40
   reward_penalty_level_up_threshold: 42 # shortest motion in TairanTestbed is 92, therefore 46 is the middle point, we set 42 here for curriculum learning level up
-  reward_penalty_degree: 0.000003 # 0.00001
+  reward_penalty_degree: 0.00001 # 0.00001
   num_compute_average_epl: 10000
 
   reward_limit:
