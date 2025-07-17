@@ -67,7 +67,7 @@ class Humanoid_Batch:
 
         self.mjcf_data = mjcf_data = self.from_mjcf(self.mjcf_file)
         self.body_names: List[str] = copy.deepcopy(mjcf_data['node_names'])
-        self._parents: torch.Tensor = mjcf_data['parent_indices']
+        self._parents: torch.Tensor = mjcf_data['parent_indices'].to(device)
         self.body_names_augment: List[str] = copy.deepcopy(
             mjcf_data['node_names'])
         self._offsets: torch.Tensor = mjcf_data['local_translation'][None, ].to(
