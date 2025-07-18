@@ -112,6 +112,7 @@ def print_actor_obs_v2(obs: np.ndarray):
             f"[orange3]Warning: Not all observation components were parsed. Remaining elements: {len(obs) - current_idx}[/orange3]")
     console.print("--- [bold magenta]End Parsing (v2)[/bold magenta] ---")
 
+
 @dataclass
 class Args:
     """

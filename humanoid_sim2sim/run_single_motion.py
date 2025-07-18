@@ -100,10 +100,10 @@ def main(cfg: DictConfig) -> None:
     print(OmegaConf.to_yaml(cfg))
 
     #  Motion
-    motion_lib= MotionLibRobot(cfg.robot.motion,1, 'cpu')
+    motion_lib = MotionLibRobot(cfg.robot.motion, 1, 'cpu')
     motion_lib.load_motions(random_sample=False)
     assert motion_lib._num_unique_motions == 1
-    motion_length= motion_lib.get_motion_length().cpu().item()
+    motion_length = motion_lib.get_motion_length().cpu().item()
 
     # Load MuJoCo model
     model = mujoco.MjModel.from_xml_path(

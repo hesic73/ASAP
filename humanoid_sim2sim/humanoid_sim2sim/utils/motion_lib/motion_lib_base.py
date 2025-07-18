@@ -14,6 +14,7 @@ from rich.progress import track
 
 from typing import Optional, Sequence, Dict, Union, List, Any, Tuple
 
+
 @torch.jit.script
 def slerp(q0: torch.Tensor, q1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
     cos_half_theta = torch.sum(q0 * q1, dim=-1)
@@ -37,7 +38,6 @@ def slerp(q0: torch.Tensor, q1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
     new_q = torch.where(torch.abs(cos_half_theta) >= 1, q0, new_q)
 
     return new_q
-
 
 
 def to_torch(tensor) -> torch.Tensor:
@@ -79,7 +79,7 @@ class MotionLibBase():
             key = list(data.keys())[0]
             motion_data = data[key]
 
-            pose_aa= np.asarray(motion_data['pose_aa'], dtype=np.float32)
+            pose_aa = np.asarray(motion_data['pose_aa'], dtype=np.float32)
             # NOTE (hsc): 这里我hardcode一下，如果是(motion_length, 24, 3)，我再额外extend到(motion_length, 27, 3)
             # 在其他地方处理太复杂了。
             if pose_aa.shape[1] == 24:
