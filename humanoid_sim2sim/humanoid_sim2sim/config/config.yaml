@@ -20,7 +20,7 @@ video:
   width: 960
   height: 1280
   camera_settings:
-    distance: 2.0
+    distance: 3.0
     azimuth: 45.0 # degrees
     elevation: -25.0 # degrees
     lookat_body: "pelvis"

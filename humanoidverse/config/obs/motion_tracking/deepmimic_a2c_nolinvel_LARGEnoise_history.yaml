@@ -26,7 +26,12 @@ obs:
       ref_motion_phase,
       dif_local_rigid_body_pos,
       local_ref_rigid_body_pos,
-      history_critic
+      history_critic,
+      com_bias,
+      base_mass_bias,
+      kp_scale,
+      kd_scale,
+      ground_friction_values,
     ]
 
   obs_auxiliary: # define those coumpounds in obs_dict, for example, you can define different long/short history with different length
@@ -62,6 +67,11 @@ obs:
     ref_motion_phase: 1.0,
     history_actor: 1.0,
     history_critic: 1.0,
+    com_bias: 10.0,
+    base_mass_bias: 1.0,
+    kp_scale: 1.0,
+    kd_scale: 1.0,
+    ground_friction_values: 1.0,
   }
 
   noise_scales: {
@@ -76,6 +86,11 @@ obs:
     ref_motion_phase: 0.0,
     history_actor: 0.0,
     history_critic: 0.0,
+    com_bias: 0.0,
+    base_mass_bias: 0.0,
+    kp_scale: 0.0,
+    kd_scale: 0.0,
+    ground_friction_values: 0.0,
   }
 
   add_noise_currculum: False
@@ -96,5 +111,10 @@ obs:
     - dif_local_rigid_body_pos: ${eval:'3 * ${robot.num_bodies} + 3 * ${robot.motion.nums_extend_bodies}'}
     - local_ref_rigid_body_pos: ${eval:'3 * ${robot.num_bodies} + 3 * ${robot.motion.nums_extend_bodies}'}
     - ref_motion_phase: 1
+    - com_bias: 3
+    - base_mass_bias: 1
+    - kp_scale: ${robot.dof_obs_size}
+    - kd_scale: ${robot.dof_obs_size}
+    - ground_friction_values: ${robot.num_bodies}
 
   post_compute_config: {} # Will store values after preprocessing, don't put anything here

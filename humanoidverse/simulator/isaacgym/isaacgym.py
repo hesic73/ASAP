@@ -426,7 +426,11 @@ class IsaacGym(BaseSimulator):
             assert base_index != -1
             # raise Exception("index 0 is for world, 13 is for torso!")
             # raise NotImplementedError
-            props[base_index].mass += np.random.uniform(rng[0], rng[1])
+            self._base_mass_bias = torch.zeros(
+                self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False)
+            base_mass_bias = np.random.uniform(rng[0], rng[1])
+            self._base_mass_bias[env_id, 0] += base_mass_bias
+            props[base_index].mass += base_mass_bias
 
         if env_id < 3:
             sum_mass = 0
