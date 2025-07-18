@@ -21,6 +21,8 @@ from humanoidverse.utils.motion_lib.skeleton import SkeletonTree
 
 from humanoidverse.utils.motion_lib.motion_lib_robot import MotionLibRobot
 
+from humanoidverse.simulator.isaacgym.isaacgym import IsaacGym
+
 from termcolor import colored
 from loguru import logger
 
@@ -660,6 +662,37 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                 history_tensor.shape[0], -1)
             history_tensors.append(history_tensor)
         return torch.cat(history_tensors, dim=1)
+
+    def _get_obs_com_bias(self) -> torch.Tensor:
+        sim = self.simulator
+        assert isinstance(sim, IsaacGym)
+        if hasattr(sim, "_base_com_bias"):
+            return sim._base_com_bias
+        else:
+            return torch.zeros(self.num_envs, 3, device=self.device, dtype=torch.float)
+
+    def _get_obs_base_mass_bias(self) -> torch.Tensor:
+        sim = self.simulator
+        assert isinstance(sim, IsaacGym)
+        if hasattr(sim, "_base_mass_bias"):
+            return sim._base_mass_bias
+        else:
+            return torch.zeros(self.num_envs, 1, device=self.device, dtype=torch.float)
+
+    def _get_obs_ground_friction_values(self) -> torch.Tensor:
+        sim = self.simulator
+        assert isinstance(sim, IsaacGym)
+        if hasattr(sim, "_ground_friction_values"):
+            return sim._ground_friction_values
+        else:
+            return torch.zeros(self.num_envs, sim.num_bodies, device=self.device, dtype=torch.float)
+
+    def _get_obs_kp_scale(self) -> torch.Tensor:
+        return self._kp_scale
+
+    def _get_obs_kd_scale(self) -> torch.Tensor:
+        return self._kd_scale
+
     ###############################################################
 
     def _reward_teleop_body_position_extend(self) -> torch.Tensor:
