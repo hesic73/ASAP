@@ -662,25 +662,32 @@ class IsaacGym(BaseSimulator):
             elif evt.action == "toggle_viewer_sync" and evt.value > 0:
                 self.enable_viewer_sync = not self.enable_viewer_sync
             elif evt.action == "forward_command" and evt.value > 0:
-                self.commands[:, 0] += 0.1
+                # self.commands[:, 0] += 0.1
+                pass
                 logger.info(f"Current Command: {self.commands[:, ]}")
             elif evt.action == "backward_command" and evt.value > 0:
-                self.commands[:, 0] -= 0.1
+                # self.commands[:, 0] -= 0.1
+                pass
                 logger.info(f"Current Command: {self.commands[:, ]}")
             elif evt.action == "left_command" and evt.value > 0:
-                self.commands[:, 1] -= 0.1
+                # self.commands[:, 1] -= 0.1
+                pass
                 logger.info(f"Current Command: {self.commands[:, ]}")
             elif evt.action == "right_command" and evt.value > 0:
-                self.commands[:, 1] += 0.1
+                # self.commands[:, 1] += 0.1
+                pass
                 logger.info(f"Current Command: {self.commands[:, ]}")
             elif evt.action == "heading_left_command" and evt.value > 0:
-                self.commands[:, 3] -= 0.1
+                # self.commands[:, 3] -= 0.1
+                pass
                 logger.info(f"Current Command: {self.commands[:, ]}")
             elif evt.action == "heading_right_command" and evt.value > 0:
-                self.commands[:, 3] += 0.1
+                # self.commands[:, 3] += 0.1
+                pass
                 logger.info(f"Current Command: {self.commands[:, ]}")
             elif evt.action == "zero_command" and evt.value > 0:
-                self.commands[:, :4] = 0
+                # self.commands[:, :4] = 0
+                pass
                 logger.info(f"Current Command: {self.commands[:, ]}")
             elif evt.action == "push_robots" and evt.value > 0:
                 logger.info("Push Robots")
