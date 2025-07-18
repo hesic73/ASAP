@@ -168,3 +168,33 @@ robot:
         parent_name: "torso_link"
         pos: [0.0, 0.0, 0.42]
         rot: [1.0, 0.0, 0.0, 0.0] # w x y z
+    
+    visualization:
+      marker_joint_colors : 
+      - [0.929, 0.867, 0.437] # pelvis
+      - [0.929, 0.867, 0.437] # left_hip_yaw_joint
+      - [0.929, 0.867, 0.437] # left_hip_roll_joint
+      - [0.929, 0.867, 0.437] # left_hip_pitch_joint
+      - [0.929, 0.867, 0.437] # left_knee_joint
+      - [0.929, 0.867, 0.437] # left_ankle_pitch_joint
+      - [0.929, 0.867, 0.437] # left_ankle_roll_joint
+      - [0.929, 0.867, 0.437] # right_hip_yaw_joint
+      - [0.929, 0.867, 0.437] # right_hip_roll_joint
+      - [0.929, 0.867, 0.437] # right_hip_pitch_joint
+      - [0.929, 0.867, 0.437] # right_knee_joint
+      - [0.929, 0.867, 0.437] # right_ankle_pitch_joint
+      - [0.929, 0.867, 0.437] # right_ankle_roll_joint
+      - [0.929, 0.867, 0.437] # waist_yaw_joint
+      - [0.929, 0.867, 0.437] # waist_roll_joint
+      - [0.929, 0.867, 0.437] # torso_joint (waist_pitch_link)
+      - [0.929, 0.867, 0.437] # left_shoulder_pitch_joint
+      - [0.929, 0.867, 0.437] # left_shoulder_roll_joint
+      - [0.929, 0.867, 0.437] # left_shoulder_yaw_joint
+      - [0.929, 0.867, 0.437] # left_elbow_joint
+      - [0.929, 0.867, 0.437] # right_shoulder_pitch_joint
+      - [0.929, 0.867, 0.437] # right_shoulder_roll_joint
+      - [0.929, 0.867, 0.437] # right_shoulder_yaw_joint
+      - [0.929, 0.867, 0.437] # right_elbow_joint
+      - [0, 0.351, 0.613] # left_elbow_joint_extend
+      - [0, 0.351, 0.613] # right_elbow_joint_extend
+      - [0, 0.351, 0.613] # head_link

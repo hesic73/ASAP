@@ -11,6 +11,9 @@ control_decimation: 20
 # Simulation parameters
 total_time: 10.0  # Total simulation time in seconds
 
+# Reference motion visualization
+show_reference_motion: true  # Whether to display reference motion markers
+
 video:
   enabled: true
   path: "my_video.mp4"

@@ -2,6 +2,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 import os
 import numpy as np
+import torch
 import math
 from typing import Tuple
 
@@ -18,7 +19,8 @@ from humanoid_sim2sim.utils.observation_manager import ObservationManager
 from humanoid_sim2sim.utils.camera_manager import CameraManager
 from humanoid_sim2sim.utils.mujoco_utils import (
     get_ordered_joint_indices,
-    initialize_robot_state
+    initialize_robot_state,
+    set_free_joint_pose,
 )
 from humanoid_sim2sim.utils.controller import LowLevelPDController
 
@@ -105,9 +107,44 @@ def main(cfg: DictConfig) -> None:
     assert motion_lib._num_unique_motions == 1
     motion_length = motion_lib.get_motion_length().cpu().item()
 
-    # Load MuJoCo model
-    model = mujoco.MjModel.from_xml_path(
-        os.path.join(ASSETS_DIR, cfg.robot.asset.xml_path))
+    # Load MuJoCo model and add reference motion markers
+    xml_path = os.path.join(ASSETS_DIR, cfg.robot.asset.xml_path)
+    spec = mujoco.MjSpec()
+    spec.from_file(xml_path)
+
+    # Add reference motion marker bodies with free joints (if enabled)
+    num_markers = 0
+    if cfg.show_reference_motion:
+        marker_colors = cfg.robot.motion.visualization.marker_joint_colors
+        num_markers = len(marker_colors)
+
+        logger.info(f"Adding {num_markers} reference motion markers")
+
+        for i in range(num_markers):
+            body = spec.worldbody.add_body(
+                name=f'ref_marker_body_{i}', gravcomp=1)
+            # Add free joint to control the marker's 6 DoF pose
+            body.add_joint(
+                name=f'ref_marker_joint_{i}', type=mujoco.mjtJoint.mjJNT_FREE)
+
+            # Convert RGB to RGBA (add alpha = 1.0)
+            color_rgb = marker_colors[i]
+            color_rgba = color_rgb + [1.0]  # Add alpha channel
+
+            # Add sphere geom for visualization
+            body.add_geom(
+                name=f'ref_marker_geom_{i}',
+                type=mujoco.mjtGeom.mjGEOM_SPHERE,
+                size=[0.04, 0, 0],  # 4cm radius sphere
+                rgba=color_rgba,
+                pos=[0, 0, 0],  # Geom is at the body's origin
+                contype=0,  # No collision
+                conaffinity=0,
+            )
+    else:
+        logger.info("Reference motion visualization disabled")
+
+    model = spec.compile()
     data = mujoco.MjData(model)
     simulation_dt: float = cfg.simulation_dt
     model.opt.timestep = simulation_dt
@@ -178,6 +215,7 @@ def main(cfg: DictConfig) -> None:
     # Simulation variables
     last_action = np.zeros(len(dof_names), dtype=np.float32)
     target_dof_pos = initial_joint_pos
+    identity_quat_wxyz = np.array([1, 0, 0, 0], dtype=np.double)
 
     step: int = 0
 
@@ -210,6 +248,39 @@ def main(cfg: DictConfig) -> None:
             target_dof_pos = action * action_scale + initial_joint_pos
 
             last_action = action.copy()
+
+            # Update reference motion markers (if enabled)
+            if cfg.show_reference_motion and num_markers > 0:
+                ref_motion_state = motion_lib.get_motion_state(
+                    torch.tensor([0], dtype=torch.int64),
+                    torch.tensor([(step + 1) * simulation_dt],
+                                 dtype=torch.float32)
+                )
+                rg_pos_t = ref_motion_state['rg_pos_t'].numpy()[0]  # (27, 3)
+
+                # NOTE (hsc): 非常奇怪，好像差180度旋转。为啥在IsaacGym里是正常的？
+                transform_type = "rot_180_z"
+
+                if transform_type == "identity":
+                    rotation_matrix = np.eye(3)
+                elif transform_type == "rot_180_z":
+                    rotation_matrix = np.array([
+                        [-1, 0, 0],   # 180 degree rotation around Z
+                        [0, -1, 0],
+                        [0, 0, 1]
+                    ])
+                else:
+                    raise ValueError(
+                        f"Unknown transform type: {transform_type}")
+
+                rg_pos_t_corrected = (rotation_matrix @ rg_pos_t.T).T
+
+                # Update marker positions using free joints
+                for i in range(min(len(rg_pos_t_corrected), num_markers)):
+                    marker_pos = rg_pos_t_corrected[i].astype(np.double)
+                    set_free_joint_pose(f'ref_marker_joint_{i}', np.concatenate(
+                        (marker_pos, identity_quat_wxyz)), model, data)
+
             # Render frame if video enabled
             if camera_manager is not None:
                 camera_manager.render_frame(data)
