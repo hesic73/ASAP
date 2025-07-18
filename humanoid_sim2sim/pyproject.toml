@@ -11,7 +11,7 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
-dependencies = ["mujoco==3.2.3", "onnxruntime"]
+dependencies = ["mujoco==3.2.3", "onnxruntime", "imageio[ffmpeg]"]
 
 [build-system]
 requires = ["setuptools>=61.0"]

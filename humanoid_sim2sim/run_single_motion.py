@@ -24,6 +24,8 @@ from humanoid_sim2sim.utils.controller import LowLevelPDController
 
 from humanoid_sim2sim.utils.debug_utils import print_actor_obs_v2
 
+from humanoid_sim2sim.utils.motion_lib.motion_lib_robot import MotionLibRobot
+
 from humanoid_sim2sim.consts import CONFIG_DIR, ASSETS_DIR
 
 
@@ -97,6 +99,12 @@ def main(cfg: DictConfig) -> None:
     OmegaConf.resolve(cfg)
     print(OmegaConf.to_yaml(cfg))
 
+    #  Motion
+    motion_lib= MotionLibRobot(cfg.robot.motion,1, 'cpu')
+    motion_lib.load_motions(random_sample=False)
+    assert motion_lib._num_unique_motions == 1
+    motion_length= motion_lib.get_motion_length().cpu().item()
+
     # Load MuJoCo model
     model = mujoco.MjModel.from_xml_path(
         os.path.join(ASSETS_DIR, cfg.robot.asset.xml_path))
@@ -162,7 +170,6 @@ def main(cfg: DictConfig) -> None:
     # Simulation parameters from config
     total_time = cfg.total_time
     control_decimation = cfg.control_decimation
-    motion_length = cfg.motion_length
 
     logger.info(f"Running simulation for {total_time}s")
     logger.info(f"Policy frequency: {1/simulation_dt/control_decimation}Hz")

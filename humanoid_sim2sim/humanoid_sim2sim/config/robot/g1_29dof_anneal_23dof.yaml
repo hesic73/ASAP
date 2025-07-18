@@ -3,11 +3,11 @@
 robot:
   num_bodies: 24
   dof_obs_size: 23
-  
+
   # Joint and body names
   floating_base_joint: "floating_base_joint"
   base_link_name: "pelvis"
-  
+
   dof_names:
     [
       "left_hip_pitch_joint",
@@ -148,3 +148,23 @@ robot:
 
   asset:
     xml_path: "g1/g1_29dof_anneal_23dof.xml"
+
+  motion:
+    motion_file: null # Path to the motion file, e.g., "path/to/motion.pkl"
+    asset:
+      assetRoot: "humanoid_sim2sim/humanoid_sim2sim/assets/g1"
+      assetFileName: "g1_29dof_anneal_23dof_fitmotionONLY.xml"
+
+    extend_config:
+      - joint_name: "left_hand_link"
+        parent_name: "left_elbow_link"
+        pos: [0.25, 0.0, 0.0]
+        rot: [1.0, 0.0, 0.0, 0.0] # w x y z
+      - joint_name: "right_hand_link"
+        parent_name: "right_elbow_link"
+        pos: [0.25, 0.0, 0.0]
+        rot: [1.0, 0.0, 0.0, 0.0] # w x y z
+      - joint_name: "head_link"
+        parent_name: "torso_link"
+        pos: [0.0, 0.0, 0.42]
+        rot: [1.0, 0.0, 0.0, 0.0] # w x y z

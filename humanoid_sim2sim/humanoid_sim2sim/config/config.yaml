@@ -10,7 +10,6 @@ control_decimation: 20
 
 # Simulation parameters
 total_time: 10.0  # Total simulation time in seconds
-motion_length: 3.933  # Motion cycle length in seconds
 
 video:
   enabled: true
