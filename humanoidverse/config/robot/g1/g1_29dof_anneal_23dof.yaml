@@ -185,6 +185,9 @@ robot:
 
   motion:
     motion_file : 'humanoidverse/data/motions/g1_29dof_anneal_23dof/v1/amass_all.pkl'
+
+    xy_scale: 1.0
+    
     # motion_file : 'humanoidverse/data/motions/g1_29dof/v1/singles/0-ACCAD_Male2General_c3d_A6- Box lift_poses.pkl'
     asset:
       assetRoot: "humanoidverse/data/robots/g1/"

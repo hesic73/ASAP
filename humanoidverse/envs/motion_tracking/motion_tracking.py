@@ -88,9 +88,13 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             self._motion_lib.load_motions(random_sample=False)
         else:
             self._motion_lib.load_motions(random_sample=True)
+        
+        self._motion_xy_scale = self.config.robot.motion.get("xy_scale", 1.0)
+        logger.info(f"Motion xy scale: {self._motion_xy_scale}")
+        self._motion_xy_scale = torch.tensor(
+            self._motion_xy_scale, device=self.device).repeat(self.num_envs)  # [num_envs]
 
-        # res = self._motion_lib.get_motion_state(self.motion_ids, self.motion_times, offset=self.env_origins)
-        res = self._resample_motion_times(torch.arange(self.num_envs))
+        self._resample_motion_times(torch.arange(self.num_envs))
         self.motion_dt = self._motion_lib._motion_dt
         self.motion_start_idx = 0
         self.num_motions = self._motion_lib._num_unique_motions
@@ -254,7 +258,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             self.motion_start_times  # next frames so +1
         # motion_res = self._get_state_from_motionlib_cache_trimesh(self.motion_ids, motion_times, offset= offset)
         motion_res = self._motion_lib.get_motion_state(
-            self.motion_ids, motion_times, offset=offset)
+            self.motion_ids, motion_times, offset=offset, xy_scale=self._motion_xy_scale)
 
         ref_body_pos_extend = motion_res["rg_pos_t"]
         # for visualization and analysis
@@ -449,9 +453,10 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                 self.motion_start_times  # next frames so +1
             offset = self.env_origins
             motion_res = self._motion_lib.get_motion_state(
-                self.motion_ids, motion_times, offset=offset)
-            self.simulator.robot_root_states[env_ids,
-                                             :3] = motion_res['root_pos'][env_ids]
+                self.motion_ids, motion_times, offset=offset, xy_scale=self._motion_xy_scale)
+
+            root_pos = motion_res['rg_pos_t'][env_ids, 0, :3]
+            self.simulator.robot_root_states[env_ids, :3] = root_pos
             # self.robot_root_states[env_ids, 2] += 0.04 # in case under the terrain
             if self.config.simulator.config.name == 'isaacgym':
                 self.simulator.robot_root_states[env_ids,
@@ -473,7 +478,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                 self.motion_start_times  # next frames so +1
             offset = self.env_origins
             motion_res = self._motion_lib.get_motion_state(
-                self.motion_ids, motion_times, offset=offset)
+                self.motion_ids, motion_times, offset=offset, xy_scale=self._motion_xy_scale)
 
             root_pos_noise = self.config.init_noise_scale.root_pos * \
                 self.config.noise_to_initial_level
@@ -484,10 +489,10 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             root_ang_vel_noise = self.config.init_noise_scale.root_ang_vel * \
                 self.config.noise_to_initial_level
 
-            root_pos = motion_res['root_pos'][env_ids]
-            root_rot = motion_res['root_rot'][env_ids]
-            root_vel = motion_res['root_vel'][env_ids]
-            root_ang_vel = motion_res['root_ang_vel'][env_ids]
+            root_pos = motion_res['rg_pos_t'][env_ids, 0, :3]
+            root_rot = motion_res['rg_rot_t'][env_ids, 0, :4]
+            root_vel = motion_res['body_vel_t'][env_ids, 0, :3]
+            root_ang_vel = motion_res['body_ang_vel_t'][env_ids, 0, :3]
 
             self.simulator.robot_root_states[env_ids, :3] = root_pos + \
                 torch.randn_like(root_pos) * root_pos_noise
@@ -535,7 +540,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             self.motion_start_times  # next frames so +1
         offset = self.env_origins
         motion_res = self._motion_lib.get_motion_state(
-            self.motion_ids, motion_times, offset=offset)
+            self.motion_ids, motion_times, offset=offset, xy_scale=self._motion_xy_scale)
 
         dof_pos_noise = self.config.init_noise_scale.dof_pos * \
             self.config.noise_to_initial_level

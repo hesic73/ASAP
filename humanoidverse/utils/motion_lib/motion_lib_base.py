@@ -86,7 +86,7 @@ class MotionLibBase():
         self._sampling_prob = torch.ones(self._num_unique_motions).to(
             self._device) / self._num_unique_motions  # For use in sampling batches
 
-    def get_motion_state(self, motion_ids: torch.Tensor, motion_times: torch.Tensor, offset: Optional[torch.Tensor] = None):
+    def get_motion_state(self, motion_ids: torch.Tensor, motion_times: torch.Tensor, offset: Optional[torch.Tensor] = None, xy_scale: Optional[torch.Tensor] = None):
         # This method remains unchanged from the original
         motion_len = self._motion_lengths[motion_ids]
         num_frames = self._motion_num_frames[motion_ids]
@@ -101,20 +101,11 @@ class MotionLibBase():
         local_rot0 = self.dof_pos[f0l]
         local_rot1 = self.dof_pos[f1l]
 
-        body_vel0 = self.gvs[f0l]
-        body_vel1 = self.gvs[f1l]
-
-        body_ang_vel0 = self.gavs[f0l]
-        body_ang_vel1 = self.gavs[f1l]
-
-        rg_pos0 = self.gts[f0l, :]
-        rg_pos1 = self.gts[f1l, :]
 
         dof_vel0 = self.dvs[f0l]
         dof_vel1 = self.dvs[f1l]
 
-        vals = [local_rot0, local_rot1, body_vel0, body_vel1, body_ang_vel0,
-                body_ang_vel1, rg_pos0, rg_pos1, dof_vel0, dof_vel1]
+        vals = [local_rot0, local_rot1, dof_vel0, dof_vel1]
         for v in vals:
             assert v.dtype != torch.float64
 
@@ -122,66 +113,67 @@ class MotionLibBase():
 
         blend_exp = blend.unsqueeze(-1)
 
-        if offset is None:
-            rg_pos = (1.0 - blend_exp) * rg_pos0 + \
-                blend_exp * rg_pos1
-        else:
-            rg_pos = (1.0 - blend_exp) * rg_pos0 + blend_exp * \
-                rg_pos1 + offset[..., None, :]
-
-        body_vel = (1.0 - blend_exp) * body_vel0 + blend_exp * body_vel1
-        body_ang_vel = (1.0 - blend_exp) * body_ang_vel0 + \
-            blend_exp * body_ang_vel1
 
         assert "dof_pos" in self.__dict__
         dof_vel = (1.0 - blend) * dof_vel0 + blend * dof_vel1
         dof_pos = (1.0 - blend) * local_rot0 + blend * local_rot1
 
-        rb_rot0 = self.grs[f0l]
-        rb_rot1 = self.grs[f1l]
-        rb_rot = slerp(rb_rot0, rb_rot1, blend_exp)
         return_dict = {}
 
-        if "gts_t" in self.__dict__:
-            rg_pos_t0 = self.gts_t[f0l]
-            rg_pos_t1 = self.gts_t[f1l]
+        assert "gts_t" in self.__dict__
+        rg_pos_t0 = self.gts_t[f0l]
+        rg_pos_t1 = self.gts_t[f1l]
 
-            rg_rot_t0 = self.grs_t[f0l]
-            rg_rot_t1 = self.grs_t[f1l]
+        rg_rot_t0 = self.grs_t[f0l]
+        rg_rot_t1 = self.grs_t[f1l]
 
-            body_vel_t0 = self.gvs_t[f0l]
-            body_vel_t1 = self.gvs_t[f1l]
+        body_vel_t0 = self.gvs_t[f0l]
+        body_vel_t1 = self.gvs_t[f1l]
 
-            body_ang_vel_t0 = self.gavs_t[f0l]
-            body_ang_vel_t1 = self.gavs_t[f1l]
-            if offset is None:
-                rg_pos_t = (1.0 - blend_exp) * rg_pos_t0 + \
-                    blend_exp * rg_pos_t1
-            else:
-                rg_pos_t = (1.0 - blend_exp) * rg_pos_t0 + \
-                    blend_exp * rg_pos_t1 + offset[..., None, :]
-            rg_rot_t = slerp(rg_rot_t0, rg_rot_t1, blend_exp)
-            body_vel_t = (1.0 - blend_exp) * body_vel_t0 + \
-                blend_exp * body_vel_t1
-            body_ang_vel_t = (1.0 - blend_exp) * \
-                body_ang_vel_t0 + blend_exp * body_ang_vel_t1
+        body_ang_vel_t0 = self.gavs_t[f0l]
+        body_ang_vel_t1 = self.gavs_t[f1l]
+        if offset is None:
+            rg_pos_t = (1.0 - blend_exp) * rg_pos_t0 + \
+                blend_exp * rg_pos_t1
         else:
-            rg_pos_t = rg_pos
-            rg_rot_t = rb_rot
-            body_vel_t = body_vel
-            body_ang_vel_t = body_ang_vel
+            rg_pos_t = (1.0 - blend_exp) * rg_pos_t0 + \
+                blend_exp * rg_pos_t1 + offset[..., None, :]
+        rg_rot_t = slerp(rg_rot_t0, rg_rot_t1, blend_exp)
+        body_vel_t = (1.0 - blend_exp) * body_vel_t0 + \
+            blend_exp * body_vel_t1
+        body_ang_vel_t = (1.0 - blend_exp) * \
+            body_ang_vel_t0 + blend_exp * body_ang_vel_t1
+
+        # Extract values before applying scaling
+        final_dof_pos = dof_pos.clone()
+        final_dof_vel = dof_vel.view(dof_vel.shape[0], -1)
+        final_rg_pos_t = rg_pos_t
+        final_rg_rot_t = rg_rot_t
+        final_body_vel_t = body_vel_t
+        final_body_ang_vel_t = body_ang_vel_t
+
+        # Apply xy scaling if provided
+        if xy_scale is not None:
+            # Get initial xy positions for current motions for all links
+            initial_xy = self.initial_xy_positions[motion_ids]  # [batch_size, 27, 2]
+            if offset is not None:
+                # Apply offset to initial positions for all links
+                initial_xy = initial_xy + offset[..., None, :2]  # [batch_size, 1, 2] -> [batch_size, 27, 2]
+            
+            # Scale rg_pos_t all links xy positions: (pos_xy - initial_xy) * scale + initial_xy  
+            final_rg_pos_t[..., :2] = (final_rg_pos_t[..., :2] - initial_xy) * xy_scale.unsqueeze(-1).unsqueeze(-1) + initial_xy
+            
+            # Scale body_vel_t xy for all bodies
+            final_body_vel_t[..., :2] *= xy_scale.unsqueeze(-1).unsqueeze(-2)  # [batch, 1, 2] to broadcast over bodies
+
 
         return_dict.update({
-            "root_pos": rg_pos[..., 0, :].clone(),
-            "root_rot": rb_rot[..., 0, :].clone(),
-            "dof_pos": dof_pos.clone(),
-            "root_vel": body_vel[..., 0, :].clone(),
-            "root_ang_vel": body_ang_vel[..., 0, :].clone(),
-            "dof_vel": dof_vel.view(dof_vel.shape[0], -1),
-            "rg_pos_t": rg_pos_t,
-            "rg_rot_t": rg_rot_t,
-            "body_vel_t": body_vel_t,
-            "body_ang_vel_t": body_ang_vel_t,
+            "dof_pos": final_dof_pos,
+            "dof_vel": final_dof_vel,
+            "rg_pos_t": final_rg_pos_t,
+            "rg_rot_t": final_rg_rot_t,
+            "body_vel_t": final_body_vel_t,
+            "body_ang_vel_t": final_body_ang_vel_t,
         })
         return return_dict
 
@@ -271,44 +263,23 @@ class MotionLibBase():
             _motion_num_frames, device=self._device)
         self._num_motions = len(motions)
 
-        # (*, 24, 3)
-        self.gts = torch.cat(
-            [m.global_translation for m in motions], dim=0).float().to(self._device)
-        # (*, 24, 4)
-        self.grs = torch.cat(
-            [m.global_rotation for m in motions], dim=0).float().to(self._device)
-        # (*, 27, 4)
-        self.lrs = torch.cat(
-            [m.local_rotation for m in motions], dim=0).float().to(self._device)
-        # (*, 3)
-        self.grvs = torch.cat(
-            [m.global_root_velocity for m in motions], dim=0).float().to(self._device)
-        # (*, 3)
-        self.gravs = torch.cat(
-            [m.global_root_angular_velocity for m in motions], dim=0).float().to(self._device)
-        # (*, 24, 3)
-        self.gavs = torch.cat(
-            [m.global_angular_velocity for m in motions], dim=0).float().to(self._device)
-        # (*, 24, 3)
-        self.gvs = torch.cat(
-            [m.global_velocity for m in motions], dim=0).float().to(self._device)
         # (*, 23)
         self.dvs = torch.cat([m.dof_vels for m in motions],
                              dim=0).float().to(self._device)
 
-        if "global_translation_extend" in motions[0].__dict__:
-            # (*, 27, 3)
-            self.gts_t = torch.cat(
-                [m.global_translation_extend for m in motions], dim=0).float().to(self._device)
-            # (*, 27, 4)
-            self.grs_t = torch.cat(
-                [m.global_rotation_extend for m in motions], dim=0).float().to(self._device)
-            # (*, 27, 3)
-            self.gvs_t = torch.cat(
-                [m.global_velocity_extend for m in motions], dim=0).float().to(self._device)
-            # (*, 27, 3)
-            self.gavs_t = torch.cat(
-                [m.global_angular_velocity_extend for m in motions], dim=0).float().to(self._device)
+        assert "global_translation_extend" in motions[0].__dict__
+        # (*, 27, 3)
+        self.gts_t = torch.cat(
+            [m.global_translation_extend for m in motions], dim=0).float().to(self._device)
+        # (*, 27, 4)
+        self.grs_t = torch.cat(
+            [m.global_rotation_extend for m in motions], dim=0).float().to(self._device)
+        # (*, 27, 3)
+        self.gvs_t = torch.cat(
+            [m.global_velocity_extend for m in motions], dim=0).float().to(self._device)
+        # (*, 27, 3)
+        self.gavs_t = torch.cat(
+            [m.global_angular_velocity_extend for m in motions], dim=0).float().to(self._device)
 
         assert "dof_pos" in motions[0].__dict__
         self.dof_pos = torch.cat(
@@ -322,10 +293,19 @@ class MotionLibBase():
             len(motions), dtype=torch.long, device=self._device)
         self.num_bodies = self.num_joints
 
+        # Store initial xy positions for each motion (first frame all links xy positions)
+        initial_xy_positions = []
+        for i, motion_start in enumerate(self.length_starts):
+            # Get the first frame of each motion for all links
+            initial_links_pos = self.gts_t[motion_start, :, :2]  # [27, 2] - xy coordinates for all links
+            initial_xy_positions.append(initial_links_pos)
+        
+        self.initial_xy_positions = torch.stack(initial_xy_positions, dim=0)  # [num_motions, 27, 2]
+
         num_motions = self._num_motions
         total_len = self.get_total_length()
         logger.info(
-            f"Processed {num_motions:d} motions with a total length of {total_len:.3f}s and {self.gts.shape[0]} frames.")
+            f"Processed {num_motions:d} motions with a total length of {total_len:.3f}s and {self.gts_t.shape[0]} frames.")
 
     def get_total_length(self) -> float:
         # This method remains unchanged from the original
