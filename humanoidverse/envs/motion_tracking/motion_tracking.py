@@ -88,7 +88,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             self._motion_lib.load_motions(random_sample=False)
         else:
             self._motion_lib.load_motions(random_sample=True)
-        
+
         self._motion_xy_scale = self.config.robot.motion.get("xy_scale", 1.0)
         logger.info(f"Motion xy scale: {self._motion_xy_scale}")
         self._motion_xy_scale = torch.tensor(
@@ -632,8 +632,11 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         return self._obs_local_ref_rigid_body_pos
 
     def _get_obs_ref_motion_phase(self):
-        # print(self._ref_motion_phase)
         return self._ref_motion_phase
+
+    def _get_obs_ref_motion_phase_sin_cos(self):
+        phase = torch.pi * 2 * self._ref_motion_phase
+        return torch.cat([torch.sin(phase), torch.cos(phase)], dim=-1)
 
     def _get_obs_vr_3point_pos(self):
         return self._obs_vr_3point_pos
