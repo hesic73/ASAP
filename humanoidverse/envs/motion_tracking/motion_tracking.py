@@ -88,7 +88,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             self._motion_lib.load_motions(random_sample=False)
         else:
             self._motion_lib.load_motions(random_sample=True)
-        
+
         self._motion_xy_scale = self.config.robot.motion.get("xy_scale", 1.0)
         logger.info(f"Motion xy scale: {self._motion_xy_scale}")
         self._motion_xy_scale = torch.tensor(

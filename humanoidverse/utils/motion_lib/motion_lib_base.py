@@ -101,7 +101,6 @@ class MotionLibBase():
         local_rot0 = self.dof_pos[f0l]
         local_rot1 = self.dof_pos[f1l]
 
-
         dof_vel0 = self.dvs[f0l]
         dof_vel1 = self.dvs[f1l]
 
@@ -112,7 +111,6 @@ class MotionLibBase():
         blend = blend.unsqueeze(-1)
 
         blend_exp = blend.unsqueeze(-1)
-
 
         assert "dof_pos" in self.__dict__
         dof_vel = (1.0 - blend) * dof_vel0 + blend * dof_vel1
@@ -155,17 +153,20 @@ class MotionLibBase():
         # Apply xy scaling if provided
         if xy_scale is not None:
             # Get initial xy positions for current motions for all links
-            initial_xy = self.initial_xy_positions[motion_ids]  # [batch_size, 27, 2]
+            # [batch_size, 27, 2]
+            initial_xy = self.initial_xy_positions[motion_ids]
             if offset is not None:
                 # Apply offset to initial positions for all links
-                initial_xy = initial_xy + offset[..., None, :2]  # [batch_size, 1, 2] -> [batch_size, 27, 2]
-            
-            # Scale rg_pos_t all links xy positions: (pos_xy - initial_xy) * scale + initial_xy  
-            final_rg_pos_t[..., :2] = (final_rg_pos_t[..., :2] - initial_xy) * xy_scale.unsqueeze(-1).unsqueeze(-1) + initial_xy
-            
-            # Scale body_vel_t xy for all bodies
-            final_body_vel_t[..., :2] *= xy_scale.unsqueeze(-1).unsqueeze(-2)  # [batch, 1, 2] to broadcast over bodies
+                # [batch_size, 1, 2] -> [batch_size, 27, 2]
+                initial_xy = initial_xy + offset[..., None, :2]
 
+            # Scale rg_pos_t all links xy positions: (pos_xy - initial_xy) * scale + initial_xy
+            final_rg_pos_t[..., :2] = (
+                final_rg_pos_t[..., :2] - initial_xy) * xy_scale.unsqueeze(-1).unsqueeze(-1) + initial_xy
+
+            # Scale body_vel_t xy for all bodies
+            # [batch, 1, 2] to broadcast over bodies
+            final_body_vel_t[..., :2] *= xy_scale.unsqueeze(-1).unsqueeze(-2)
 
         return_dict.update({
             "dof_pos": final_dof_pos,
@@ -297,10 +298,12 @@ class MotionLibBase():
         initial_xy_positions = []
         for i, motion_start in enumerate(self.length_starts):
             # Get the first frame of each motion for all links
-            initial_links_pos = self.gts_t[motion_start, :, :2]  # [27, 2] - xy coordinates for all links
+            # [27, 2] - xy coordinates for all links
+            initial_links_pos = self.gts_t[motion_start, :, :2]
             initial_xy_positions.append(initial_links_pos)
-        
-        self.initial_xy_positions = torch.stack(initial_xy_positions, dim=0)  # [num_motions, 27, 2]
+
+        self.initial_xy_positions = torch.stack(
+            initial_xy_positions, dim=0)  # [num_motions, 27, 2]
 
         num_motions = self._num_motions
         total_len = self.get_total_length()

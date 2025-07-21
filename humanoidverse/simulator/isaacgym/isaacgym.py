@@ -650,9 +650,11 @@ class IsaacGym(BaseSimulator):
         # video recording
         self.user_is_recording, self.user_recording_state_change = False, False
         self.user_recording_video_queue_size = 100000
-        self.save_rendering_dir.mkdir(parents=True, exist_ok=True)
-        self.user_recording_video_path = str(
-            self.save_rendering_dir / f"{self.config.experiment_name}-%s")
+
+        if self.config.save_rendering_dir is not None:
+            self.save_rendering_dir.mkdir(parents=True, exist_ok=True)
+            self.user_recording_video_path = str(
+                self.save_rendering_dir / f"{self.config.experiment_name}-%s")
 
     def render(self, sync_frame_time=True):
         # check for window closed
