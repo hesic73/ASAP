@@ -151,6 +151,8 @@ robot:
 
   motion:
     motion_file: null # Path to the motion file, e.g., "path/to/motion.pkl"
+    xy_scale: 1.0
+    
     asset:
       assetRoot: "humanoid_sim2sim/humanoid_sim2sim/assets/g1"
       assetFileName: "g1_29dof_anneal_23dof_fitmotionONLY.xml"
