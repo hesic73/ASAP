@@ -84,6 +84,8 @@ def get_observations(
     ref_motion_phase = (counter + 1) * simulation_dt / motion_length
     ref_motion_phase = np.clip(ref_motion_phase, 0, 1)
     ref_motion_phase = np.array([ref_motion_phase], dtype=np.float32)
+    ref_motion_phase_sin_cos = np.concatenate(
+        (np.sin(ref_motion_phase*2*np.pi), np.cos(ref_motion_phase*2*np.pi)), axis=-1).astype(np.float32)
 
     return {
         "dof_pos": joint_pos.astype(np.float32),
@@ -92,6 +94,7 @@ def get_observations(
         "projected_gravity": projected_gravity.astype(np.float32),
         "actions": last_action.astype(np.float32),
         "ref_motion_phase": ref_motion_phase,
+        "ref_motion_phase_sin_cos": ref_motion_phase_sin_cos,
     }
 
 

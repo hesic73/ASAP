@@ -8,7 +8,8 @@ from loguru import logger
 
 def run_evaluation(
     log_dir: str,
-    n_epochs: int = None
+    n_epochs: int = None,
+    use_xvfb: bool = False
 ):
 
     # 1. Determine n_epochs if not provided
@@ -61,6 +62,9 @@ def run_evaluation(
     logger.info(f"Found motion_file: {motion_file}")
     logger.info(f"Found motion_xy_scale: {motion_xy_scale}")
 
+    run_name = config['run_name']
+    logger.info(f"Found run_name: {run_name}")
+
     # --- Create video output directories ---
     isaacgym_video_dir = os.path.join(log_dir, "videos", "isaacgym")
     mujoco_video_dir = os.path.join(log_dir, "videos", "mujoco")
@@ -71,7 +75,8 @@ def run_evaluation(
     logger.info(
         "\nRunning humanoidverse/eval_offline.py for offline evaluation...")
     checkpoint_path = os.path.join(log_dir, f"model_{n_epochs}.pt")
-    isaacgym_video_path = os.path.join(isaacgym_video_dir, f"{n_epochs}.mp4")
+    isaacgym_video_path = os.path.join(isaacgym_video_dir, f"{run_name}_{n_epochs}_isaacgym.mp4")
+    
     eval_command = [
         "python", "humanoidverse/eval_offline.py",
         f"+device={device}",
@@ -79,6 +84,11 @@ def run_evaluation(
         f"+checkpoint={checkpoint_path}",
         f"algo.config.eval_callbacks.offline_rendering.config.video_filename={isaacgym_video_path}"
     ]
+    
+    if use_xvfb:
+        logger.info("Using xvfb...")
+        eval_command = ["xvfb-run", "-s", "-screen 0 800x600x24"] + eval_command
+    
     subprocess.run(eval_command, check=True)
     logger.info("Offline evaluation complete.")
 
@@ -86,7 +96,7 @@ def run_evaluation(
     logger.info(
         "\nRunning humanoid_sim2sim/run_single_motion.py for motion simulation and video generation...")
     onnx_path = os.path.join(log_dir, "exported", f"model_{n_epochs}.onnx")
-    mujoco_video_path = os.path.join(mujoco_video_dir, f"{n_epochs}.mp4")
+    mujoco_video_path = os.path.join(mujoco_video_dir, f"{run_name}_{n_epochs}_mujoco.mp4")
 
     sim_command = [
         "python", "humanoid_sim2sim/run_single_motion.py",
