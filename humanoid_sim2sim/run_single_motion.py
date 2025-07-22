@@ -99,7 +99,7 @@ def get_observations(
 def main(cfg: DictConfig) -> None:
     OmegaConf.register_new_resolver("eval", eval)
     OmegaConf.resolve(cfg)
-    print(OmegaConf.to_yaml(cfg))
+    # print(OmegaConf.to_yaml(cfg))
 
     #  Motion
     motion_lib = MotionLibRobot(cfg.robot.motion, 1, 'cpu')
@@ -222,7 +222,8 @@ def main(cfg: DictConfig) -> None:
             torch.tensor([0], dtype=torch.int64),
             torch.tensor([0.0], dtype=torch.float32)
         )
-        rg_pos_t0 = ref_motion_state_0['rg_pos_t'].numpy()[0]  # (num_markers, 3)
+        rg_pos_t0 = ref_motion_state_0['rg_pos_t'].numpy()[
+            0]  # (num_markers, 3)
         root_initial_xy = rg_pos_t0[0, :2].copy()
 
     # Simulation variables
@@ -265,9 +266,11 @@ def main(cfg: DictConfig) -> None:
             if cfg.show_reference_motion and num_markers > 0:
                 ref_motion_state = motion_lib.get_motion_state(
                     torch.tensor([0], dtype=torch.int64),
-                    torch.tensor([(step + 1) * simulation_dt], dtype=torch.float32)
+                    torch.tensor([(step + 1) * simulation_dt],
+                                 dtype=torch.float32)
                 )
-                rg_pos_t = ref_motion_state['rg_pos_t'].numpy()[0]  # (num_markers, 3)
+                rg_pos_t = ref_motion_state['rg_pos_t'].numpy()[
+                    0]  # (num_markers, 3)
 
                 # NOTE (hsc): 非常奇怪，好像差180度旋转。为啥在IsaacGym里是正常的？
                 transform_type = "rot_180_z"
