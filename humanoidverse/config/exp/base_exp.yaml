@@ -3,5 +3,3 @@
 defaults:
   - /algo: base_algo
   - /env: base_task
-
-experiment_name: TESTBaseExp

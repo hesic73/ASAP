@@ -5,10 +5,12 @@ defaults:
   - base/hydra
   - base/structure
   - simulator: isaacgym
-  - domain_rand: NO_domain_rand
+  - domain_rand: domain_rand_asap
   - robot: g1/g1_29dof_anneal_23dof
   - terrain: terrain_locomotion_plane 
-  - obs: motion_tracking/motion_tracking
+  - obs: motion_tracking/deepmimic_a2c_nolinvel_LARGEnoise_history
+  - rewards: motion_tracking/reward_motion_tracking_dm_2real
+  - exp: motion_tracking
 
 # These are global variables that all levels of the config can access.
 ## Experiment setup

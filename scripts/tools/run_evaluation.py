@@ -75,20 +75,23 @@ def run_evaluation(
     logger.info(
         "\nRunning humanoidverse/eval_offline.py for offline evaluation...")
     checkpoint_path = os.path.join(log_dir, f"model_{n_epochs}.pt")
-    isaacgym_video_path = os.path.join(isaacgym_video_dir, f"{run_name}_{n_epochs}_isaacgym.mp4")
-    
+    isaacgym_video_path = os.path.join(
+        isaacgym_video_dir, f"{run_name}_{n_epochs}_isaacgym.mp4")
+
     eval_command = [
         "python", "humanoidverse/eval_offline.py",
         f"+device={device}",
+        f"+domain_rand=NO_domain_rand",  # disable domain randomization
         "+opt=my_eval_callbacks",
         f"+checkpoint={checkpoint_path}",
         f"algo.config.eval_callbacks.offline_rendering.config.video_filename={isaacgym_video_path}"
     ]
-    
+
     if use_xvfb:
         logger.info("Using xvfb...")
-        eval_command = ["xvfb-run", "-s", "-screen 0 800x600x24"] + eval_command
-    
+        eval_command = ["xvfb-run", "-s",
+                        "-screen 0 800x600x24"] + eval_command
+
     subprocess.run(eval_command, check=True)
     logger.info("Offline evaluation complete.")
 
@@ -96,7 +99,8 @@ def run_evaluation(
     logger.info(
         "\nRunning humanoid_sim2sim/run_single_motion.py for motion simulation and video generation...")
     onnx_path = os.path.join(log_dir, "exported", f"model_{n_epochs}.onnx")
-    mujoco_video_path = os.path.join(mujoco_video_dir, f"{run_name}_{n_epochs}_mujoco.mp4")
+    mujoco_video_path = os.path.join(
+        mujoco_video_dir, f"{run_name}_{n_epochs}_mujoco.mp4")
 
     sim_command = [
         "python", "humanoid_sim2sim/run_single_motion.py",
