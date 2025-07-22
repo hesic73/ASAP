@@ -107,6 +107,9 @@ def main(cfg: DictConfig) -> None:
     assert motion_lib._num_unique_motions == 1
     motion_length = motion_lib.get_motion_length().cpu().item()
 
+    motion_xy_scale = cfg.robot.motion.get("xy_scale", 1.0)
+    logger.info(f"Motion XY scale: {motion_xy_scale}")
+
     # Load MuJoCo model and add reference motion markers
     xml_path = os.path.join(ASSETS_DIR, cfg.robot.asset.xml_path)
     spec = mujoco.MjSpec()
@@ -212,6 +215,16 @@ def main(cfg: DictConfig) -> None:
     logger.info(f"Policy frequency: {1/simulation_dt/control_decimation}Hz")
     logger.info(f"Motion cycle length: {motion_length}s")
 
+    # 记录 root marker 的初始 xy 坐标（for reference motion markers）
+    root_initial_xy = None
+    if cfg.show_reference_motion and num_markers > 0:
+        ref_motion_state_0 = motion_lib.get_motion_state(
+            torch.tensor([0], dtype=torch.int64),
+            torch.tensor([0.0], dtype=torch.float32)
+        )
+        rg_pos_t0 = ref_motion_state_0['rg_pos_t'].numpy()[0]  # (num_markers, 3)
+        root_initial_xy = rg_pos_t0[0, :2].copy()
+
     # Simulation variables
     last_action = np.zeros(len(dof_names), dtype=np.float32)
     target_dof_pos = initial_joint_pos
@@ -249,14 +262,12 @@ def main(cfg: DictConfig) -> None:
 
             last_action = action.copy()
 
-            # Update reference motion markers (if enabled)
             if cfg.show_reference_motion and num_markers > 0:
                 ref_motion_state = motion_lib.get_motion_state(
                     torch.tensor([0], dtype=torch.int64),
-                    torch.tensor([(step + 1) * simulation_dt],
-                                 dtype=torch.float32)
+                    torch.tensor([(step + 1) * simulation_dt], dtype=torch.float32)
                 )
-                rg_pos_t = ref_motion_state['rg_pos_t'].numpy()[0]  # (27, 3)
+                rg_pos_t = ref_motion_state['rg_pos_t'].numpy()[0]  # (num_markers, 3)
 
                 # NOTE (hsc): 非常奇怪，好像差180度旋转。为啥在IsaacGym里是正常的？
                 transform_type = "rot_180_z"
@@ -275,9 +286,18 @@ def main(cfg: DictConfig) -> None:
 
                 rg_pos_t_corrected = (rotation_matrix @ rg_pos_t.T).T
 
-                # Update marker positions using free joints
+                root_xy = rg_pos_t_corrected[0][:2]
+                root_delta = root_xy - root_initial_xy
+                root_xy_scaled = root_initial_xy + root_delta * motion_xy_scale
+
                 for i in range(min(len(rg_pos_t_corrected), num_markers)):
                     marker_pos = rg_pos_t_corrected[i].astype(np.double)
+                    if i == 0:
+                        marker_pos[:2] = root_xy_scaled
+                    else:
+                        offset = marker_pos[:2] - root_xy
+                        marker_pos[:2] = root_xy_scaled + offset
+
                     set_free_joint_pose(f'ref_marker_joint_{i}', np.concatenate(
                         (marker_pos, identity_quat_wxyz)), model, data)
 

@@ -632,8 +632,11 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         return self._obs_local_ref_rigid_body_pos
 
     def _get_obs_ref_motion_phase(self):
-        # print(self._ref_motion_phase)
         return self._ref_motion_phase
+
+    def _get_obs_ref_motion_phase_sin_cos(self):
+        phase = torch.pi * 2 * self._ref_motion_phase
+        return torch.cat([torch.sin(phase), torch.cos(phase)], dim=-1)
 
     def _get_obs_vr_3point_pos(self):
         return self._obs_vr_3point_pos
