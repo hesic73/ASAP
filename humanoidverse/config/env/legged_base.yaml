@@ -33,6 +33,3 @@ env:
       termination_close_to_dof_pos_limit : 0.98
       termination_close_to_dof_vel_limit : 0.98
       termination_close_to_torque_limit : 0.98
-
-# Globally accessible parameters
-log_task_name: legged_base

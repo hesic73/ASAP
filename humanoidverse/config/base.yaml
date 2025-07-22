@@ -21,19 +21,18 @@ num_envs: 4096
 auto_load_latest: False
 checkpoint: null
 
-### Naming and dir structure
-project_name: MotionTracking
-experiment_name: TEST
+project_name: ASAP
+experiment_name: my_exp
+run_name: my_run
 
 base_dir: logs
 timestamp: ${now:%Y%m%d_%H%M%S}
-experiment_dir: ${base_dir}/${project_name}/${timestamp}-${experiment_name}-${log_task_name}-${robot.asset.robot_type}
+experiment_dir: ${base_dir}/${experiment_name}/${timestamp}-${run_name}
 save_dir: ${experiment_dir}/.hydra
 
 force_flat_terrain: False
 
 use_wandb: True
-log_task_name: TEST
 
 wandb:
   wandb_dir: wandb

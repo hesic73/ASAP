@@ -39,8 +39,6 @@ env:
       
 
 
-# Globally accessible parameters
-log_task_name: locomotion
 
 eval_overrides:
   env:
