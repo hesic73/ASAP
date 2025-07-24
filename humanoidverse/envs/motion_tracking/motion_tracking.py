@@ -165,6 +165,29 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         self.motion_len = torch.zeros(
             self.num_envs, dtype=torch.float32, device=self.device, requires_grad=False)
 
+        # Initialize foot contact buffers
+        self._current_foot_contacts = torch.zeros(
+            self.num_envs, 2, dtype=torch.bool, device=self.device, requires_grad=False)
+        self._ref_foot_contacts = torch.zeros(
+            self.num_envs, 2, dtype=torch.float32, device=self.device, requires_grad=False)
+
+        # Assert feet_indices order is left then right for robust foot contact mapping
+        assert len(self.feet_indices) == 2
+        left_foot_name = f"left_{self.config.robot.foot_name}"
+        right_foot_name = f"right_{self.config.robot.foot_name}"
+
+        left_foot_idx = None
+        right_foot_idx = None
+
+        for i, foot_idx in enumerate(self.feet_indices):
+            body_name = self.simulator._body_list[foot_idx.item()]
+            if left_foot_name in body_name.lower():
+                left_foot_idx = i
+            elif right_foot_name in body_name.lower():
+                right_foot_idx = i
+
+        assert left_foot_idx == 0 and right_foot_idx == 1
+
     def _init_domain_rand_buffers(self):
         super()._init_domain_rand_buffers()
 
@@ -177,6 +200,10 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         self._resample_motion_times(env_ids)
         if self.config.termination.terminate_when_motion_far and self.config.termination_curriculum.terminate_when_motion_far_curriculum:
             self._update_terminate_when_motion_far_curriculum()
+
+        # Reset foot contact buffers
+        self._current_foot_contacts[env_ids] = False
+        self._ref_foot_contacts[env_ids] = 0.0
 
     def _update_terminate_when_motion_far_curriculum(self):
         assert self.config.termination.terminate_when_motion_far and self.config.termination_curriculum.terminate_when_motion_far_curriculum
@@ -271,6 +298,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         ref_body_ang_vel_extend = motion_res["body_ang_vel_t"]
         ref_joint_pos = motion_res["dof_pos"]  # [num_envs, num_dofs]
         ref_joint_vel = motion_res["dof_vel"]  # [num_envs, num_dofs]
+        ref_foot_contacts = motion_res["foot_contacts"]  # [num_envs, 2]
 
         ################### EXTEND Rigid body POS #####################
         rotated_pos_in_parent = my_quat_rotate(
@@ -394,6 +422,15 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         # print(f"ref_motion_phase: {self._ref_motion_phase[0].item():.2f}")
         # print(f"ref_motion_length: {self._ref_motion_length[0].item():.2f}")
 
+        #################### Foot Contacts #####################
+        # Update current simulation foot contacts
+        # [num_envs, 2] - left and right foot contact status (True if contact force > 1.0)
+        self._current_foot_contacts[:] = self.simulator.contact_forces[:,
+                                                                       self.feet_indices, 2] > 1.0
+        # Update reference foot contacts from motion library
+        # [num_envs, 2] - left and right foot contact status from reference motion
+        self._ref_foot_contacts[:] = ref_foot_contacts
+
         self._log_motion_tracking_info()
 
     def _compute_reward(self):
@@ -420,6 +457,19 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                                                       self.motion_tracking_id, :]
             vr_3point_diff_norm = vr_3point_diff.norm(dim=-1).mean()
             self.log_dict["vr_3point_diff_norm"] = vr_3point_diff_norm
+
+        # Log foot contact alignment information
+        contact_alignment_score = self._reward_contact_alignment()
+        self.log_dict["contact_alignment_score"] = contact_alignment_score.mean()
+
+        # Log individual foot contact states
+        current_contacts = self._current_foot_contacts.float()
+        ref_contacts = self._ref_foot_contacts
+
+        self.log_dict["current_left_foot_contact"] = current_contacts[:, 0].mean()
+        self.log_dict["current_right_foot_contact"] = current_contacts[:, 1].mean()
+        self.log_dict["ref_left_foot_contact"] = ref_contacts[:, 0].mean()
+        self.log_dict["ref_right_foot_contact"] = ref_contacts[:, 1].mean()
 
     def _draw_debug_vis(self):
         self.simulator.clear_lines()
@@ -701,6 +751,22 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
     def _get_obs_kd_scale(self) -> torch.Tensor:
         return self._kd_scale
 
+    def _get_obs_current_foot_contacts(self) -> torch.Tensor:
+        """
+        Get current simulation foot contact states.
+        Returns:
+            torch.Tensor: [num_envs, 2] - left and right foot contact status (1.0 if in contact, 0.0 otherwise)
+        """
+        return self._current_foot_contacts.float()
+
+    def _get_obs_ref_foot_contacts(self) -> torch.Tensor:
+        """
+        Get reference motion foot contact states.
+        Returns:
+            torch.Tensor: [num_envs, 2] - left and right foot contact status from reference motion
+        """
+        return self._ref_foot_contacts
+
     ###############################################################
 
     def _reward_teleop_body_position_extend(self) -> torch.Tensor:
@@ -776,6 +842,26 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         r_joint_vel = torch.exp(-diff_joint_vel_dist /
                                 self.config.rewards.reward_tracking_sigma.teleop_joint_vel)
         return r_joint_vel
+
+    def _reward_contact_alignment(self):
+        """
+        Reward for aligning current foot contacts with reference motion contacts.
+        Computes the agreement between current simulation foot contacts and reference motion contacts.
+        """
+        # Convert boolean contacts to float for comparison
+        # [num_envs, 2]
+        current_contacts_float = self._current_foot_contacts.float()
+        ref_contacts_float = self._ref_foot_contacts  # [num_envs, 2]
+
+        # Compute contact alignment for each foot (1.0 if aligned, 0.0 if misaligned)
+        contact_alignment = 1.0 - \
+            torch.abs(current_contacts_float -
+                      ref_contacts_float)  # [num_envs, 2]
+
+        # Average across both feet
+        contact_alignment_score = contact_alignment.mean(dim=-1)  # [num_envs]
+
+        return contact_alignment_score
 
     def setup_visualize_entities(self):
         if self.debug_viz and self.config.simulator.config.name == "genesis":

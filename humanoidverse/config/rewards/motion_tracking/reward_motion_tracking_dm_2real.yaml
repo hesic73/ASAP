@@ -33,6 +33,8 @@ rewards:
       limits_torque: -5.0
       termination: -200.0
       # feet_max_height_for_this_air: -100.0
+
+      contact_alignment: 0.5
       
 
   teleop_body_pos_lowerbody_weight : 0.5

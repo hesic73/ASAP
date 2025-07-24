@@ -32,6 +32,8 @@ obs:
       kp_scale,
       kd_scale,
       ground_friction_values,
+      current_foot_contacts,
+      ref_foot_contacts,
     ]
 
   obs_auxiliary: # define those coumpounds in obs_dict, for example, you can define different long/short history with different length
@@ -72,6 +74,8 @@ obs:
     kp_scale: 1.0,
     kd_scale: 1.0,
     ground_friction_values: 1.0,
+    current_foot_contacts: 1.0,
+    ref_foot_contacts: 1.0,
   }
 
   noise_scales: {
@@ -91,6 +95,8 @@ obs:
     kp_scale: 0.0,
     kd_scale: 0.0,
     ground_friction_values: 0.0,
+    current_foot_contacts: 0.0,
+    ref_foot_contacts: 0.0,
   }
 
   add_noise_currculum: False
@@ -116,5 +122,5 @@ obs:
     - kp_scale: ${robot.dof_obs_size}
     - kd_scale: ${robot.dof_obs_size}
     - ground_friction_values: ${robot.num_bodies}
-
-  post_compute_config: {} # Will store values after preprocessing, don't put anything here
+    - current_foot_contacts: 2
+    - ref_foot_contacts: 2

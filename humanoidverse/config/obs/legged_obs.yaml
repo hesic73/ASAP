@@ -14,5 +14,4 @@ obs:
   noise_scales: ???
 
   obs_dims: ???
-  # Will store values after preprocessing, don't put anything here
-  post_compute_config: {} 
+

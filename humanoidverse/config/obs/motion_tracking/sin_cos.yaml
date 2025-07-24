@@ -116,5 +116,3 @@ obs:
     - kp_scale: ${robot.dof_obs_size}
     - kd_scale: ${robot.dof_obs_size}
     - ground_friction_values: ${robot.num_bodies}
-
-  post_compute_config: {} # Will store values after preprocessing, don't put anything here

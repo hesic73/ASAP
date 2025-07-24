@@ -67,7 +67,8 @@ class MotionLibBase():
             self._motion_data_cache.append({
                 'root_trans_offset': np.asarray(motion_data['root_trans_offset'], dtype=np.float32),
                 'pose_aa': pose_aa,
-                'fps': motion_data['fps']
+                'fps': motion_data['fps'],
+                'foot_contacts': np.asarray(motion_data['foot_contacts'], dtype=np.float32)
             })
 
         self._num_unique_motions = len(self._motion_data_cache)
@@ -168,6 +169,9 @@ class MotionLibBase():
             # [batch, 1, 2] to broadcast over bodies
             final_body_vel_t[..., :2] *= xy_scale.unsqueeze(-1).unsqueeze(-2)
 
+        # Get foot contacts (no interpolation needed as per user requirement)
+        foot_contacts = self.foot_contacts[f0l]
+
         return_dict.update({
             "dof_pos": final_dof_pos,
             "dof_vel": final_dof_vel,
@@ -175,6 +179,7 @@ class MotionLibBase():
             "rg_rot_t": final_rg_rot_t,
             "body_vel_t": final_body_vel_t,
             "body_ang_vel_t": final_body_ang_vel_t,
+            "foot_contacts": foot_contacts,
         })
         return return_dict
 
@@ -225,6 +230,8 @@ class MotionLibBase():
                 start:end].to(self._device)
             pose_aa = to_torch(
                 curr_file_data['pose_aa'][start:end]).clone().to(self._device)
+            foot_contacts = to_torch(
+                curr_file_data['foot_contacts'][start:end]).clone().to(self._device)
             motion_fps = curr_file_data['fps']
             dt = 1.0 / motion_fps
 
@@ -233,6 +240,8 @@ class MotionLibBase():
                     pose_aa[None, ], trans[None, ], return_full=True, dt=dt)
                 curr_motion = EasyDict({k: v.squeeze() if torch.is_tensor(
                     v) else v for k, v in curr_motion.items()})
+                # Add foot_contacts to the motion data
+                curr_motion.foot_contacts = foot_contacts
             else:
                 logger.error("No mesh parser found")
                 # Handle case where fk is not possible
@@ -285,6 +294,10 @@ class MotionLibBase():
         assert "dof_pos" in motions[0].__dict__
         self.dof_pos = torch.cat(
             [m.dof_pos for m in motions], dim=0).float().to(self._device)
+
+        # (*, 2)
+        self.foot_contacts = torch.cat(
+            [m.foot_contacts for m in motions], dim=0).float().to(self._device)
 
         lengths = self._motion_num_frames
         lengths_shifted = lengths.roll(1)
