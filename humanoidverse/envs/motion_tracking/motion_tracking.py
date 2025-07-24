@@ -462,14 +462,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         contact_alignment_score = self._reward_contact_alignment()
         self.log_dict["contact_alignment_score"] = contact_alignment_score.mean()
 
-        # Log individual foot contact states
-        current_contacts = self._current_foot_contacts.float()
-        ref_contacts = self._ref_foot_contacts
-
-        self.log_dict["current_left_foot_contact"] = current_contacts[:, 0].mean()
-        self.log_dict["current_right_foot_contact"] = current_contacts[:, 1].mean()
-        self.log_dict["ref_left_foot_contact"] = ref_contacts[:, 0].mean()
-        self.log_dict["ref_right_foot_contact"] = ref_contacts[:, 1].mean()
 
     def _draw_debug_vis(self):
         self.simulator.clear_lines()

@@ -34,7 +34,7 @@ rewards:
       termination: -200.0
       # feet_max_height_for_this_air: -100.0
 
-      contact_alignment: 0.5
+      contact_alignment: 2.0
       
 
   teleop_body_pos_lowerbody_weight : 0.5
