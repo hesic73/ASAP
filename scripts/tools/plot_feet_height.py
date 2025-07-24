@@ -4,7 +4,7 @@ import pickle
 import torch
 from omegaconf import OmegaConf, DictConfig
 from pathlib import Path
-
+from loguru import logger
 import fire
 
 from humanoidverse.utils.motion_lib.torch_humanoid_batch import Humanoid_Batch
@@ -33,6 +33,9 @@ def plot_feet_height(filename: Path,
         key = list(data.keys())[0]
         data = data[key]
 
+    foot_contacts = torch.tensor(
+        data['foot_contacts'], dtype=torch.float32, device=device)  # (N, 2)
+
     fps = int(data['fps'])
 
     trans = torch.tensor(data['root_trans_offset'],
@@ -51,38 +54,45 @@ def plot_feet_height(filename: Path,
     num_frames = len(left_foot_height)
     time_axis = np.arange(num_frames) / fps
 
+    # Convert foot contacts to numpy for plotting
+    left_foot_contact = foot_contacts[:, 0].cpu().numpy()
+    right_foot_contact = foot_contacts[:, 1].cpu().numpy()
+
     # Set figure size and style
-    plt.figure(figsize=(12, 8))
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
     plt.rcParams['font.size'] = 12
     plt.rcParams['axes.linewidth'] = 1.2
     plt.rcParams['lines.linewidth'] = 2
 
-    # Plot foot heights
-    plt.plot(time_axis, left_foot_height,
+    # Plot foot heights in first subplot
+    ax1.plot(time_axis, left_foot_height,
              label="Left Foot Height", color="red", alpha=0.8)
-    plt.plot(time_axis, right_foot_height,
+    ax1.plot(time_axis, right_foot_height,
              label="Right Foot Height", color="blue", alpha=0.8)
+    ax1.set_ylabel("Height (meters)", fontsize=14, fontweight='bold')
+    ax1.set_title("Foot Height Over Time", fontsize=16, fontweight='bold')
+    ax1.grid(True, alpha=0.3, linestyle='--')
+    ax1.yaxis.set_major_formatter(plt.FormatStrFormatter('%.3f'))
 
-    # Set axis labels and title
-    plt.xlabel("Time (seconds)", fontsize=14, fontweight='bold')
-    plt.ylabel("Height (meters)", fontsize=14, fontweight='bold')
-    plt.title("Foot Height Over Time", fontsize=16, fontweight='bold')
-
-    # Set grid
-    plt.grid(True, alpha=0.3, linestyle='--')
-
-    # Set coordinate axis precision and tick density
-    plt.gca().xaxis.set_major_formatter(plt.FormatStrFormatter('%.2f'))
-    plt.gca().yaxis.set_major_formatter(plt.FormatStrFormatter('%.3f'))
-
-    # Make y-axis ticks more dense (0.05 interval)
-    y_min, y_max = plt.gca().get_ylim()
+    # Make y-axis ticks more dense for height plot
+    y_min, y_max = ax1.get_ylim()
     y_ticks = np.arange(np.floor(y_min * 20) / 20,
                         np.ceil(y_max * 20) / 20, 0.05)
-    plt.gca().set_yticks(y_ticks)
+    ax1.set_yticks(y_ticks)
+    ax1.legend(fontsize=12, framealpha=0.9)
 
-    # Set legend
-    plt.legend(fontsize=12, framealpha=0.9)
+    # Plot foot contacts in second subplot
+    ax2.plot(time_axis, left_foot_contact,
+             label="Left Foot Contact", color="red", alpha=0.8)
+    ax2.plot(time_axis, right_foot_contact,
+             label="Right Foot Contact", color="blue", alpha=0.8)
+    ax2.set_xlabel("Time (seconds)", fontsize=14, fontweight='bold')
+    ax2.set_ylabel("Contact", fontsize=14, fontweight='bold')
+    ax2.set_title("Foot Contacts Over Time", fontsize=16, fontweight='bold')
+    ax2.grid(True, alpha=0.3, linestyle='--')
+    ax2.xaxis.set_major_formatter(plt.FormatStrFormatter('%.2f'))
+    ax2.set_ylim(-0.1, 1.1)  # Set y-axis range for contact values (0 or 1)
+    ax2.legend(fontsize=12, framealpha=0.9)
 
     # Adjust layout
     plt.tight_layout()
@@ -90,6 +100,7 @@ def plot_feet_height(filename: Path,
     # Save figure
     plt.savefig(filename.with_suffix(".png"), dpi=300, bbox_inches='tight')
     plt.close()
+    logger.info(f"Saved figure to {filename.with_suffix('.png')}")
 
 
 if __name__ == "__main__":
