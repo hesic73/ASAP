@@ -462,7 +462,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         contact_alignment_score = self._reward_contact_alignment()
         self.log_dict["contact_alignment_score"] = contact_alignment_score.mean()
 
-
     def _draw_debug_vis(self):
         self.simulator.clear_lines()
         self._refresh_sim_tensors()
@@ -758,6 +757,15 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             torch.Tensor: [num_envs, 2] - left and right foot contact status from reference motion
         """
         return self._ref_foot_contacts
+
+    def _get_obs_action_delay_one_hot(self) -> torch.Tensor:
+        action_delay_idx = self.action_delay_idx
+        ctrl_delay_step_range = self.config.domain_rand.ctrl_delay_step_range
+        action_delay_one_hot = torch.zeros(
+            self.num_envs, ctrl_delay_step_range[1]-ctrl_delay_step_range[0]+1, device=self.device, dtype=torch.float)
+        action_delay_one_hot[torch.arange(
+            self.num_envs), action_delay_idx-ctrl_delay_step_range[0]] = 1.0
+        return action_delay_one_hot
 
     ###############################################################
 

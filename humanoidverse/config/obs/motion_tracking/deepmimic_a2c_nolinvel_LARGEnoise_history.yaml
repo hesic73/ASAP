@@ -34,6 +34,7 @@ obs:
       ground_friction_values,
       current_foot_contacts,
       ref_foot_contacts,
+      action_delay_one_hot,
     ]
 
   obs_auxiliary: # define those coumpounds in obs_dict, for example, you can define different long/short history with different length
@@ -76,6 +77,7 @@ obs:
     ground_friction_values: 1.0,
     current_foot_contacts: 1.0,
     ref_foot_contacts: 1.0,
+    action_delay_one_hot: 1.0,
   }
 
   noise_scales: {
@@ -97,6 +99,7 @@ obs:
     ground_friction_values: 0.0,
     current_foot_contacts: 0.0,
     ref_foot_contacts: 0.0,
+    action_delay_one_hot: 0.0,
   }
 
   add_noise_currculum: False
@@ -124,3 +127,4 @@ obs:
     - ground_friction_values: ${robot.num_bodies}
     - current_foot_contacts: 2
     - ref_foot_contacts: 2
+    - action_delay_one_hot: 3
