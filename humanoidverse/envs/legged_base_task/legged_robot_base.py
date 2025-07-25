@@ -141,6 +141,9 @@ class LeggedRobotBase(BaseTask):
                 self.num_envs, self.config.domain_rand.ctrl_delay_step_range[1]+1, self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
             self.action_delay_idx = torch.randint(self.config.domain_rand.ctrl_delay_step_range[0],
                                                   self.config.domain_rand.ctrl_delay_step_range[1]+1, (self.num_envs,), device=self.device, requires_grad=False)
+        else:
+            self.action_delay_idx = torch.zeros(
+                self.num_envs, dtype=torch.int, device=self.device, requires_grad=False)
 
         # self._link_mass_scale = torch.ones(self.num_envs, len(self.config.robot.randomize_link_body_names), dtype=torch.float, device=self.device, requires_grad=False)
         self._kp_scale = torch.ones(
