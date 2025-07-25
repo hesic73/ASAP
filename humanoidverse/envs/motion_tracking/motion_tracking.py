@@ -789,23 +789,26 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
 
         return r_body_pos
 
-    def _reward_teleop_vr_3point(self):
-        if "motion_tracking_link" not in self.config.robot.motion:
-            return torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
-        vr_3point_diff = self.dif_global_body_pos[:,
-                                                  self.motion_tracking_id, :]
-        vr_3point_dist = (vr_3point_diff**2).mean(dim=-1).mean(dim=-1)
-        r_vr_3point = torch.exp(-vr_3point_dist /
-                                self.config.rewards.reward_tracking_sigma.teleop_vr_3point_pos)
-        return r_vr_3point
+    # NOTE (hsc): 我还是把它去掉吧。Personally我觉得这不引入额外的信息，因为它就是按照fk算出来的。
+    # 而且我们的data source是video而不是VR
+    # def _reward_teleop_vr_3point(self):
+    #     if "motion_tracking_link" not in self.config.robot.motion:
+    #         return torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
+    #     vr_3point_diff = self.dif_global_body_pos[:,
+    #                                               self.motion_tracking_id, :]
+    #     vr_3point_dist = (vr_3point_diff**2).mean(dim=-1).mean(dim=-1)
+    #     r_vr_3point = torch.exp(-vr_3point_dist /
+    #                             self.config.rewards.reward_tracking_sigma.teleop_vr_3point_pos)
+    #     return r_vr_3point
 
-    def _reward_teleop_body_position_feet(self):
+    # NOTE (hsc): 脚我也去掉吧。它其实已经被包含在lower_body_link里了。然后VideoMimic算出来的脚也不是很准，没必要特别强调。
+    # def _reward_teleop_body_position_feet(self):
 
-        feet_diff = self.dif_global_body_pos[:, self.feet_indices, :]
-        feet_dist = (feet_diff**2).mean(dim=-1).mean(dim=-1)
-        r_feet = torch.exp(-feet_dist /
-                           self.config.rewards.reward_tracking_sigma.teleop_feet_pos)
-        return r_feet
+    #     feet_diff = self.dif_global_body_pos[:, self.feet_indices, :]
+    #     feet_dist = (feet_diff**2).mean(dim=-1).mean(dim=-1)
+    #     r_feet = torch.exp(-feet_dist /
+    #                        self.config.rewards.reward_tracking_sigma.teleop_feet_pos)
+    #     return r_feet
 
     def _reward_teleop_body_rotation_extend(self):
         rotation_diff = quat_to_angle_axis(self.dif_global_body_rot)[0]

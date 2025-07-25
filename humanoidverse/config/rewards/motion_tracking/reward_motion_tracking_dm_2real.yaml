@@ -9,8 +9,8 @@ rewards:
   only_positive_rewards: False
   reward_scales:
       teleop_body_position_extend: 1.0
-      teleop_vr_3point: 1.6
-      teleop_body_position_feet: 2.1
+      # teleop_vr_3point: 1.6
+      # teleop_body_position_feet: 2.1
       teleop_body_rotation_extend: 0.5
       teleop_body_ang_velocity_extend: 0.5
       teleop_body_velocity_extend: 0.5
@@ -45,8 +45,8 @@ rewards:
   reward_tracking_sigma:
     teleop_upper_body_pos: 0.03
     teleop_lower_body_pos: 0.1
-    teleop_vr_3point_pos: 0.03
-    teleop_feet_pos: 0.03
+    # teleop_vr_3point_pos: 0.03
+    # teleop_feet_pos: 0.03
 
     teleop_body_rot: 1.0
     teleop_body_vel: 1.0

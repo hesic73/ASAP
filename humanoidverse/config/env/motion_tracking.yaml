@@ -33,7 +33,7 @@ env:
       terminate_when_motion_far_curriculum: True
       terminate_when_motion_far_initial_threshold: 1.5
       terminate_when_motion_far_threshold_max: 2.0
-      terminate_when_motion_far_threshold_min: 0.3
+      terminate_when_motion_far_threshold_min: 0.5
       terminate_when_motion_far_curriculum_degree: 0.0000025
       terminate_when_motion_far_curriculum_level_down_threshold: 40
       terminate_when_motion_far_curriculum_level_up_threshold: 42
