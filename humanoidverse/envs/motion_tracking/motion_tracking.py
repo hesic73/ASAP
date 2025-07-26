@@ -457,6 +457,21 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         self.log_dict["lower_body_diff_norm"] = lower_body_diff_norm
         self.log_dict["joint_pos_diff_norm"] = joint_pos_diff_norm
 
+        # Log pelvis orientation difference
+        pelvis_rot_diff = quat_to_angle_axis(self.dif_global_body_rot[:, self.pelvis_id, :])[0] # (num_envs,)
+        pelvis_rot_diff_norm = pelvis_rot_diff.mean()
+        self.log_dict["pelvis_rot_diff_norm"] = pelvis_rot_diff_norm
+
+        # Log torso position difference
+        torso_pos_diff = self.dif_global_body_pos[:, self.base_id, :]
+        torso_pos_diff_norm = torso_pos_diff.norm(dim=-1).mean()
+        self.log_dict["torso_pos_diff_norm"] = torso_pos_diff_norm
+
+        # Log torso orientation difference
+        torso_rot_diff = quat_to_angle_axis(self.dif_global_body_rot[:, self.base_id, :])[0]
+        torso_rot_diff_norm = torso_rot_diff.mean()
+        self.log_dict["torso_rot_diff_norm"] = torso_rot_diff_norm
+
         if "motion_tracking_link" in self.config.robot.motion:
             vr_3point_diff = self.dif_global_body_pos[:,
                                                       self.motion_tracking_id, :]
