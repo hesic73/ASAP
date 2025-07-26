@@ -115,6 +115,8 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
 
         self.pelvis_id = self.simulator._body_list.index(
             self.config.robot.motion.pelvis_link)
+        self.base_id = self.simulator._body_list.index(
+            self.config.robot.motion.base_link)
 
     def _init_motion_extend(self):
         extend_parent_ids, extend_pos, extend_rot = [], [], []
@@ -772,7 +774,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
 
     ###############################################################
 
-    def _reward_teleop_body_position_extend(self) -> torch.Tensor:
+    def _reward_link_pos(self) -> torch.Tensor:
         # (num_envs, num_upper_body_joints, 3)
         upper_body_diff = self.dif_global_body_pos[:, self.upper_body_id, :]
         # (num_envs, num_lower_body_joints, 3)
@@ -792,62 +794,47 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
 
         return r_body_pos
 
-    # NOTE (hsc): 我还是把它去掉吧。Personally我觉得这不引入额外的信息，因为它就是按照fk算出来的。
-    # 而且我们的data source是video而不是VR
-    # def _reward_teleop_vr_3point(self):
-    #     if "motion_tracking_link" not in self.config.robot.motion:
-    #         return torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
-    #     vr_3point_diff = self.dif_global_body_pos[:,
-    #                                               self.motion_tracking_id, :]
-    #     vr_3point_dist = (vr_3point_diff**2).mean(dim=-1).mean(dim=-1)
-    #     r_vr_3point = torch.exp(-vr_3point_dist /
-    #                             self.config.rewards.reward_tracking_sigma.teleop_vr_3point_pos)
-    #     return r_vr_3point
-
-    # NOTE (hsc): 脚我也去掉吧。它其实已经被包含在lower_body_link里了。然后VideoMimic算出来的脚也不是很准，没必要特别强调。
-    # def _reward_teleop_body_position_feet(self):
-
-    #     feet_diff = self.dif_global_body_pos[:, self.feet_indices, :]
-    #     feet_dist = (feet_diff**2).mean(dim=-1).mean(dim=-1)
-    #     r_feet = torch.exp(-feet_dist /
-    #                        self.config.rewards.reward_tracking_sigma.teleop_feet_pos)
-    #     return r_feet
-
-    def _reward_teleop_body_rotation_extend(self):
-        rotation_diff = quat_to_angle_axis(self.dif_global_body_rot)[0]
-        diff_body_rot_dist = (rotation_diff**2).mean(dim=-1)
-        r_body_rot = torch.exp(-diff_body_rot_dist /
-                               self.config.rewards.reward_tracking_sigma.teleop_body_rot)
-        return r_body_rot
-
-    def _reward_teleop_body_velocity_extend(self):
+    def _reward_link_vel(self):
         velocity_diff = self.dif_global_body_vel
         diff_body_vel_dist = (velocity_diff**2).mean(dim=-1).mean(dim=-1)
         r_body_vel = torch.exp(-diff_body_vel_dist /
-                               self.config.rewards.reward_tracking_sigma.teleop_body_vel)
+                               self.config.rewards.reward_tracking_sigma.link_vel)
         return r_body_vel
 
-    def _reward_teleop_body_ang_velocity_extend(self):
-        ang_velocity_diff = self.dif_global_body_ang_vel
-        diff_body_ang_vel_dist = (
-            ang_velocity_diff**2).mean(dim=-1).mean(dim=-1)
-        r_body_ang_vel = torch.exp(-diff_body_ang_vel_dist /
-                                   self.config.rewards.reward_tracking_sigma.teleop_body_ang_vel)
-        return r_body_ang_vel
-
-    def _reward_teleop_joint_position(self):
+    def _reward_joint_pos(self):
         joint_pos_diff = self.dif_joint_angles
         diff_joint_pos_dist = (joint_pos_diff**2).mean(dim=-1)
         r_joint_pos = torch.exp(-diff_joint_pos_dist /
                                 self.config.rewards.reward_tracking_sigma.teleop_joint_pos)
         return r_joint_pos
 
-    def _reward_teleop_joint_velocity(self):
+    def _reward_joint_vel(self):
         joint_vel_diff = self.dif_joint_velocities
         diff_joint_vel_dist = (joint_vel_diff**2).mean(dim=-1)
         r_joint_vel = torch.exp(-diff_joint_vel_dist /
                                 self.config.rewards.reward_tracking_sigma.teleop_joint_vel)
         return r_joint_vel
+
+    def _reward_root_ori(self):
+        rotation_diff = quat_to_angle_axis(self.dif_global_body_rot[:, self.pelvis_id, :])[0]
+        diff_body_rot_dist = (rotation_diff**2)
+        r_body_rot = torch.exp(-diff_body_rot_dist /
+                               self.config.rewards.reward_tracking_sigma.root_ori)
+        return r_body_rot
+
+    def _reward_torso_pos(self):
+        torso_pos_diff = self.dif_global_body_pos[:, self.base_id, :]
+        diff_body_pos_dist = (torso_pos_diff**2).mean(dim=-1)
+        r_body_pos = torch.exp(-diff_body_pos_dist /
+                               self.config.rewards.reward_tracking_sigma.torso_pos)
+        return r_body_pos
+
+    def _reward_torso_ori(self):
+        rotation_diff = quat_to_angle_axis(self.dif_global_body_rot[:, self.base_id, :])[0]
+        diff_body_rot_dist = (rotation_diff**2)
+        r_body_rot = torch.exp(-diff_body_rot_dist /
+                               self.config.rewards.reward_tracking_sigma.torso_ori)
+        return r_body_rot
 
     def _reward_contact_alignment(self):
         """
