@@ -9,7 +9,8 @@ from loguru import logger
 def run_evaluation(
     log_dir: str,
     n_epochs: int = None,
-    use_xvfb: bool = False
+    use_xvfb: bool = False,
+    enforce_randomize_motion_start_eval: bool = False,
 ):
 
     # 1. Determine n_epochs if not provided
@@ -91,6 +92,11 @@ def run_evaluation(
         logger.info("Using xvfb...")
         eval_command = ["xvfb-run", "-s",
                         "-screen 0 800x600x24"] + eval_command
+
+    if enforce_randomize_motion_start_eval:
+        logger.info("Enforcing randomize motion start eval...")
+        eval_command.append(
+            "+env.config.enforce_randomize_motion_start_eval=True")
 
     subprocess.run(eval_command, check=True)
     logger.info("Offline evaluation complete.")
