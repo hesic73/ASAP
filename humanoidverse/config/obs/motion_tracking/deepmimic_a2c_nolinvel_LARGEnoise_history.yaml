@@ -10,9 +10,6 @@ obs:
       dof_vel,
       actions,
       ref_motion_phase,
-      # dif_local_rigid_body_pos,
-      # local_ref_rigid_body_pos,
-      # history,
       history_actor
     ]
 
@@ -45,7 +42,6 @@ obs:
       dof_pos: 4,
       dof_vel: 4,
       actions: 4,
-      ref_motion_phase: 4
     }
 
     history_critic: {
@@ -55,7 +51,6 @@ obs:
       dof_pos: 4,
       dof_vel: 4,
       actions: 4,
-      ref_motion_phase: 4
     }
 
   obs_scales: {

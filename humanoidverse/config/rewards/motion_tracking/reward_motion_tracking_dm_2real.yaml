@@ -43,7 +43,7 @@ rewards:
   desired_feet_max_height_for_this_air: 0.2
 
   reward_tracking_sigma:
-    teleop_upper_body_pos: 0.03
+    teleop_upper_body_pos: 0.05
     teleop_lower_body_pos: 0.1
     # teleop_vr_3point_pos: 0.03
     # teleop_feet_pos: 0.03

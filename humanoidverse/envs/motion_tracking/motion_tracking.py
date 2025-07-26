@@ -113,6 +113,9 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             self.resample_time_interval = np.ceil(
                 self.config.resample_time_interval_s / self.dt)
 
+        self.pelvis_id = self.simulator._body_list.index(
+            self.config.robot.pelvis_link)
+
     def _init_motion_extend(self):
         extend_parent_ids, extend_pos, extend_rot = [], [], []
         for extend_config in self.config.robot.motion.get("extend_config", []):

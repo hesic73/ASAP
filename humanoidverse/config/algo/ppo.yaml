@@ -18,14 +18,14 @@ algo:
     schedule: "adaptive"
     desired_kl: 0.01
 
-    num_steps_per_env: 24
+    num_steps_per_env: 32
     save_interval: 100
 
     load_optimizer: True
 
     init_noise_std: 0.8
 
-    num_learning_iterations: 1000000
+    num_learning_iterations: 100000
     init_at_random_ep_len: True
     eval_callbacks: null
 
@@ -43,5 +43,5 @@ algo:
         output_dim: [1]
         layer_config:
           type: MLP
-          hidden_dims: [512, 256, 128]
+          hidden_dims: [768, 256, 128]
           activation: ELU
