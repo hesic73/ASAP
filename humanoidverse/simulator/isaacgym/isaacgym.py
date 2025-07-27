@@ -69,7 +69,10 @@ class IsaacGym(BaseSimulator):
         sim_params.dt = 1.0 / self.simulator_config.sim.fps
         sim_params.up_axis = gymapi.UP_AXIS_Z
         # sim_params.up_axis = 1  # 0 is y, 1 is z
-        sim_params.gravity = gymapi.Vec3(0., 0., -9.81)
+        if self.simulator_config.sim.gravity is not None:
+            sim_params.gravity = gymapi.Vec3(self.simulator_config.sim.gravity[0], self.simulator_config.sim.gravity[1], self.simulator_config.sim.gravity[2])
+        else:
+            sim_params.gravity = gymapi.Vec3(0., 0., -9.81)
         sim_params.num_client_threads = 0
 
         sim_params.physx.solver_type = self.simulator_config.sim.physx.solver_type

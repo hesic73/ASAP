@@ -15,6 +15,7 @@ simulator:
       fps: 200
       control_decimation: 4
       substeps: 1
+      gravity: [0.0, 0.0, -9.81]
       physx:
         num_threads: 4
         solver_type: 1 # 0: pgs, 1: tgs
