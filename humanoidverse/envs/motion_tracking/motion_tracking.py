@@ -43,8 +43,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         self.init_done = True
         self.debug_viz = True
 
-        self._init_save_motion()
-
         assert not self.config.get("use_teleop_control", False)
 
         if self.config.termination.terminate_when_motion_far and self.config.termination_curriculum.terminate_when_motion_far_curriculum:
@@ -56,29 +54,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             self.terminate_when_motion_far_threshold = self.config.termination_scales.termination_motion_far_threshold
             logger.info(
                 f"Terminate when motion far threshold: {self.terminate_when_motion_far_threshold}")
-
-    def _init_save_motion(self):
-        if "save_motion" in self.config:
-            self.save_motion = self.config.save_motion
-            if self.save_motion:
-                os.makedirs(Path(self.config.ckpt_dir) /
-                            "motions", exist_ok=True)
-
-                if hasattr(self.config, 'dump_motion_name'):
-                    self.save_motion_dir = Path(self.config.ckpt_dir) / "motions" / (
-                        str(self.config.eval_timestamp) + "_" + self.config.dump_motion_name)
-                else:
-                    self.save_motion_dir = Path(
-                        self.config.ckpt_dir) / "motions" / f"{self.config.save_note}_{self.config.eval_timestamp}"
-                self.save_motion = True
-                self.num_augment_joint = len(
-                    self.config.robot.motion.extend_config)
-                self.motions_for_saving = {'root_trans_offset': [], 'pose_aa': [], 'dof': [], 'root_rot': [], 'actor_obs': [], 'action': [], 'terminate': [],
-                                           'root_lin_vel': [], 'root_ang_vel': [], 'dof_vel': []}
-                self.motion_times_buf = []
-
-        else:
-            self.save_motion = False
 
     def _init_motion_lib(self):
         self.config.robot.motion.step_dt = self.dt
@@ -615,76 +590,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             torch.randn_like(dof_pos) * dof_pos_noise
         self.simulator.dof_vel[env_ids] = dof_vel + \
             torch.randn_like(dof_vel) * dof_vel_noise
-
-    def _post_physics_step(self):
-        super()._post_physics_step()
-
-        if self.save_motion:
-            motion_times = (self.episode_length_buf) * \
-                self.dt + self.motion_start_times
-
-            if (len(self.motions_for_saving['dof'])) > self.config.save_total_steps:
-                for k, v in self.motions_for_saving.items():
-                    self.motions_for_saving[k] = torch.stack(
-                        v[3:]).transpose(0, 1).numpy()
-
-                self.motions_for_saving['motion_times'] = torch.stack(
-                    self.motion_times_buf[3:]).transpose(0, 1).numpy()
-
-                dump_data = {}
-                num_motions = self.num_envs
-                keys_to_save = self.motions_for_saving.keys()
-
-                for i in range(num_motions):
-                    motion_key = f"motion{i}"
-                    dump_data[motion_key] = {
-                        key: self.motions_for_saving[key][i] for key in keys_to_save
-                    }
-                    dump_data[motion_key]['fps'] = 1 / self.dt
-
-                joblib.dump(dump_data, f'{self.save_motion_dir}.pkl')
-
-                print(
-                    colored(f"Saved motion data to {self.save_motion_dir}.pkl", 'green'))
-                import sys
-                sys.exit()
-
-            root_trans = self.simulator.robot_root_states[:, 0:3].cpu()
-            if self.config.simulator.config.name == "isaacgym":
-                # xyzw
-                root_rot = self.simulator.robot_root_states[:, 3:7].cpu()
-            elif self.config.simulator.config.name == "isaacsim":
-                root_rot = self.simulator.robot_root_states[:, [
-                    4, 5, 6, 3]].cpu()  # wxyz to xyzw
-            elif self.config.simulator.config.name == "genesis":
-                # xyzw
-                root_rot = self.simulator.robot_root_states[:,  3:7].cpu()
-            else:
-                raise NotImplementedError
-            root_rot_vec = torch.from_numpy(
-                sRot.from_quat(root_rot.numpy()).as_rotvec()).float()
-            dof = self.simulator.dof_pos.cpu()
-            # T, num_env, J, 3
-            # print(self._motion_lib.mesh_parsers.dof_axis)
-            pose_aa = torch.cat([root_rot_vec[:, None, :], self._motion_lib.mesh_parsers.dof_axis *
-                                dof[:, :, None], torch.zeros((self.num_envs, self.num_augment_joint, 3))], axis=1)
-            self.motions_for_saving['root_trans_offset'].append(root_trans)
-            self.motions_for_saving['root_rot'].append(root_rot)
-            self.motions_for_saving['dof'].append(dof)
-            self.motions_for_saving['pose_aa'].append(pose_aa)
-            self.motions_for_saving['action'].append(self.actions.cpu())
-            self.motions_for_saving['actor_obs'].append(
-                self.obs_buf_dict['actor_obs'].cpu())
-            self.motions_for_saving['terminate'].append(self.reset_buf.cpu())
-
-            self.motions_for_saving['dof_vel'].append(
-                self.simulator.dof_vel.cpu())
-            self.motions_for_saving['root_lin_vel'].append(
-                self.simulator.robot_root_states[:, 7:10].cpu())
-            self.motions_for_saving['root_ang_vel'].append(
-                self.simulator.robot_root_states[:, 10:13].cpu())
-
-            self.motion_times_buf.append(motion_times.cpu())
 
     # ############################################################
 

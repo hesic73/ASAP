@@ -18,3 +18,8 @@ algo:
         _target_: humanoidverse.agents.callbacks.record_trajectory.RecordTrajectoryCallback
         config:
           trajectory_filename: "${eval_log_dir}/eval_trajectory.npz"
+
+      save_motion:
+        _target_: humanoidverse.agents.callbacks.save_motion.SaveMotionCallback
+        config:
+          motion_name: "refined"
