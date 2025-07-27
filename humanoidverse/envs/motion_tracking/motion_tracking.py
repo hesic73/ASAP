@@ -458,7 +458,8 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         self.log_dict["joint_pos_diff_norm"] = joint_pos_diff_norm
 
         # Log pelvis orientation difference
-        pelvis_rot_diff = quat_to_angle_axis(self.dif_global_body_rot[:, self.pelvis_id, :])[0] # (num_envs,)
+        pelvis_rot_diff = quat_to_angle_axis(
+            self.dif_global_body_rot[:, self.pelvis_id, :])[0]  # (num_envs,)
         pelvis_rot_diff_norm = pelvis_rot_diff.mean()
         self.log_dict["pelvis_rot_diff_norm"] = pelvis_rot_diff_norm
 
@@ -468,7 +469,8 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         self.log_dict["torso_pos_diff_norm"] = torso_pos_diff_norm
 
         # Log torso orientation difference
-        torso_rot_diff = quat_to_angle_axis(self.dif_global_body_rot[:, self.base_id, :])[0]
+        torso_rot_diff = quat_to_angle_axis(
+            self.dif_global_body_rot[:, self.base_id, :])[0]
         torso_rot_diff_norm = torso_rot_diff.mean()
         self.log_dict["torso_rot_diff_norm"] = torso_rot_diff_norm
 
@@ -816,40 +818,34 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                                self.config.rewards.reward_tracking_sigma.link_vel)
         return r_body_vel
 
+    def _reward_link_ori(self):
+        rotation_diff = quat_to_angle_axis(self.dif_global_body_rot)[0]
+        diff_body_rot_dist = (rotation_diff**2).mean(dim=-1)
+        r_body_rot = torch.exp(-diff_body_rot_dist /
+                               self.config.rewards.reward_tracking_sigma.link_ori)
+        return r_body_rot
+
+    def _reward_link_ang_vel(self):
+        ang_velocity_diff = self.dif_global_body_ang_vel
+        diff_body_ang_vel_dist = (
+            ang_velocity_diff**2).mean(dim=-1).mean(dim=-1)
+        r_body_ang_vel = torch.exp(-diff_body_ang_vel_dist /
+                                   self.config.rewards.reward_tracking_sigma.link_ang_vel)
+        return r_body_ang_vel
+
     def _reward_joint_pos(self):
         joint_pos_diff = self.dif_joint_angles
         diff_joint_pos_dist = (joint_pos_diff**2).mean(dim=-1)
         r_joint_pos = torch.exp(-diff_joint_pos_dist /
-                                self.config.rewards.reward_tracking_sigma.teleop_joint_pos)
+                                self.config.rewards.reward_tracking_sigma.joint_pos)
         return r_joint_pos
 
     def _reward_joint_vel(self):
         joint_vel_diff = self.dif_joint_velocities
         diff_joint_vel_dist = (joint_vel_diff**2).mean(dim=-1)
         r_joint_vel = torch.exp(-diff_joint_vel_dist /
-                                self.config.rewards.reward_tracking_sigma.teleop_joint_vel)
+                                self.config.rewards.reward_tracking_sigma.joint_vel)
         return r_joint_vel
-
-    def _reward_root_ori(self):
-        rotation_diff = quat_to_angle_axis(self.dif_global_body_rot[:, self.pelvis_id, :])[0]
-        diff_body_rot_dist = (rotation_diff**2)
-        r_body_rot = torch.exp(-diff_body_rot_dist /
-                               self.config.rewards.reward_tracking_sigma.root_ori)
-        return r_body_rot
-
-    def _reward_torso_pos(self):
-        torso_pos_diff = self.dif_global_body_pos[:, self.base_id, :]
-        diff_body_pos_dist = (torso_pos_diff**2).mean(dim=-1)
-        r_body_pos = torch.exp(-diff_body_pos_dist /
-                               self.config.rewards.reward_tracking_sigma.torso_pos)
-        return r_body_pos
-
-    def _reward_torso_ori(self):
-        rotation_diff = quat_to_angle_axis(self.dif_global_body_rot[:, self.base_id, :])[0]
-        diff_body_rot_dist = (rotation_diff**2)
-        r_body_rot = torch.exp(-diff_body_rot_dist /
-                               self.config.rewards.reward_tracking_sigma.torso_ori)
-        return r_body_rot
 
     def _reward_contact_alignment(self):
         """

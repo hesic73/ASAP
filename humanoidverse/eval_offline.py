@@ -158,7 +158,7 @@ def main(override_config: OmegaConf):
         logger.info(
             f'Exported policy as onnx to: {os.path.join(exported_policy_path, exported_onnx_name)}')
 
-    algo.evaluate_policy(max_steps=500)
+    algo.evaluate_policy(max_steps=300)
 
 
 if __name__ == "__main__":
