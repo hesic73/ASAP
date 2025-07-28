@@ -122,9 +122,9 @@ class SaveMotionCallback(RL_EvalCallback):
             self.foot_contacts[start_idx:]).transpose(0, 1).numpy()
 
         episode_data = {
-            'root_trans_offset': root_trans_offset[:, 0],
-            'pose_aa': pose_aa[:, 0],
-            'foot_contacts': foot_contacts[:, 0],
+            'root_trans_offset': root_trans_offset.squeeze(0),
+            'pose_aa': pose_aa.squeeze(0),
+            'foot_contacts': foot_contacts.squeeze(0),
             'fps': self.fps
         }
 
