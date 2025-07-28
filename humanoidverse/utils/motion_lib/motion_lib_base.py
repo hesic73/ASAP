@@ -76,7 +76,6 @@ class MotionLibBase():
             f"Pre-loaded {self._num_unique_motions} unique motions into memory.")
 
     def setup_constants(self):
-        # ... (The rest of the original setup_constants method remains unchanged)
         self._curr_motion_ids = None
         self._termination_history = torch.zeros(
             self._num_unique_motions).to(self._device)
@@ -88,7 +87,6 @@ class MotionLibBase():
             self._device) / self._num_unique_motions  # For use in sampling batches
 
     def get_motion_state(self, motion_ids: torch.Tensor, motion_times: torch.Tensor, offset: Optional[torch.Tensor] = None, xy_scale: Optional[torch.Tensor] = None):
-        # This method remains unchanged from the original
         motion_len = self._motion_lengths[motion_ids]
         num_frames = self._motion_num_frames[motion_ids]
         dt = self._motion_dt[motion_ids]
@@ -98,28 +96,20 @@ class MotionLibBase():
         f0l = frame_idx0 + self.length_starts[motion_ids]
         f1l = frame_idx1 + self.length_starts[motion_ids]
 
-        assert "dof_pos" in self.__dict__
         local_rot0 = self.dof_pos[f0l]
         local_rot1 = self.dof_pos[f1l]
 
         dof_vel0 = self.dvs[f0l]
         dof_vel1 = self.dvs[f1l]
 
-        vals = [local_rot0, local_rot1, dof_vel0, dof_vel1]
-        for v in vals:
-            assert v.dtype != torch.float64
-
         blend = blend.unsqueeze(-1)
-
         blend_exp = blend.unsqueeze(-1)
 
-        assert "dof_pos" in self.__dict__
         dof_vel = (1.0 - blend) * dof_vel0 + blend * dof_vel1
         dof_pos = (1.0 - blend) * local_rot0 + blend * local_rot1
 
         return_dict = {}
 
-        assert "gts_t" in self.__dict__
         rg_pos_t0 = self.gts_t[f0l]
         rg_pos_t1 = self.gts_t[f1l]
 
@@ -277,7 +267,6 @@ class MotionLibBase():
         self.dvs = torch.cat([m.dof_vels for m in motions],
                              dim=0).float().to(self._device)
 
-        assert "global_translation_extend" in motions[0].__dict__
         # (*, 27, 3)
         self.gts_t = torch.cat(
             [m.global_translation_extend for m in motions], dim=0).float().to(self._device)
@@ -291,7 +280,6 @@ class MotionLibBase():
         self.gavs_t = torch.cat(
             [m.global_angular_velocity_extend for m in motions], dim=0).float().to(self._device)
 
-        assert "dof_pos" in motions[0].__dict__
         self.dof_pos = torch.cat(
             [m.dof_pos for m in motions], dim=0).float().to(self._device)
 
@@ -324,18 +312,15 @@ class MotionLibBase():
             f"Processed {num_motions:d} motions with a total length of {total_len:.3f}s and {self.gts_t.shape[0]} frames.")
 
     def get_total_length(self) -> float:
-        # This method remains unchanged from the original
         return self._motion_lengths.sum().item()
 
     def get_motion_num_steps(self, motion_ids: Optional[torch.Tensor] = None) -> torch.Tensor:
-        # This method remains unchanged from the original
         if motion_ids is None:
             return (self._motion_num_frames * self._sim_fps / self._motion_fps).ceil().int()
         else:
             return (self._motion_num_frames[motion_ids] * self._sim_fps / self._motion_fps).ceil().int()
 
     def sample_time(self, motion_ids: torch.Tensor, truncate_time: Optional[float] = None):
-        # This method remains unchanged from the original
         n = len(motion_ids)
         phase = torch.rand(motion_ids.shape, device=self._device)
         motion_len = self._motion_lengths[motion_ids]
@@ -347,14 +332,12 @@ class MotionLibBase():
         return motion_time.to(self._device)
 
     def get_motion_length(self, motion_ids: Optional[torch.Tensor] = None) -> torch.Tensor:
-        # This method remains unchanged from the original
         if motion_ids is None:
             return self._motion_lengths
         else:
             return self._motion_lengths[motion_ids]
 
     def _calc_frame_blend(self, time: torch.Tensor, len: torch.Tensor, num_frames: torch.Tensor, dt: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # This method remains unchanged from the original
         time = time.clone()
         phase = time / len
         phase = torch.clip(phase, 0.0, 1.0)

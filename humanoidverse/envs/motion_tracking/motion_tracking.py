@@ -75,9 +75,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         self.num_motions = self._motion_lib._num_unique_motions
 
     def _init_tracking_config(self):
-        if "motion_tracking_link" in self.config.robot.motion:
-            self.motion_tracking_id = [self.simulator._body_list.index(
-                link) for link in self.config.robot.motion.motion_tracking_link]
         if "lower_body_link" in self.config.robot.motion:
             self.lower_body_id = [self.simulator._body_list.index(
                 link) for link in self.config.robot.motion.lower_body_link]
@@ -419,12 +416,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             self.dif_global_body_rot[:, self.base_id, :])[0]
         torso_rot_diff_norm = torso_rot_diff.mean()
         self.log_dict["torso_rot_diff_norm"] = torso_rot_diff_norm
-
-        if "motion_tracking_link" in self.config.robot.motion:
-            vr_3point_diff = self.dif_global_body_pos[:,
-                                                      self.motion_tracking_id, :]
-            vr_3point_diff_norm = vr_3point_diff.norm(dim=-1).mean()
-            self.log_dict["vr_3point_diff_norm"] = vr_3point_diff_norm
 
         # Log foot contact alignment information
         contact_alignment_score = self._reward_contact_alignment()
