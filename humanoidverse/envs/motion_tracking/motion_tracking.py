@@ -35,7 +35,32 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         self.init_done = False
         self.debug_viz = True
 
+
+        self.simulator_name = config.simulator.config.name
         super().__init__(config, device)
+
+        # Cache frequently accessed config values to avoid repeated OmegaConf access in hot path
+        
+        self.noise_to_initial_level = self.config.noise_to_initial_level
+        self.init_noise_scale_root_pos = self.config.init_noise_scale.root_pos
+        self.init_noise_scale_root_rot = self.config.init_noise_scale.root_rot
+        self.init_noise_scale_root_vel = self.config.init_noise_scale.root_vel
+        self.init_noise_scale_root_ang_vel = self.config.init_noise_scale.root_ang_vel
+        self.init_noise_scale_dof_pos = self.config.init_noise_scale.dof_pos
+        self.init_noise_scale_dof_vel = self.config.init_noise_scale.dof_vel
+        # Cache reward function config values
+        self.reward_tracking_sigma_teleop_upper_body_pos = self.config.rewards.reward_tracking_sigma.teleop_upper_body_pos
+        self.reward_tracking_sigma_teleop_lower_body_pos = self.config.rewards.reward_tracking_sigma.teleop_lower_body_pos
+        self.teleop_body_pos_lowerbody_weight = self.config.rewards.teleop_body_pos_lowerbody_weight
+        self.teleop_body_pos_upperbody_weight = self.config.rewards.teleop_body_pos_upperbody_weight
+        self.reward_tracking_sigma_link_vel = self.config.rewards.reward_tracking_sigma.link_vel
+        self.reward_tracking_sigma_link_ori = self.config.rewards.reward_tracking_sigma.link_ori
+        self.reward_tracking_sigma_link_ang_vel = self.config.rewards.reward_tracking_sigma.link_ang_vel
+        self.reward_tracking_sigma_joint_pos = self.config.rewards.reward_tracking_sigma.joint_pos
+        self.reward_tracking_sigma_joint_vel = self.config.rewards.reward_tracking_sigma.joint_vel
+        # Cache domain randomization config values
+        self.ctrl_delay_step_range = self.config.domain_rand.ctrl_delay_step_range
+  
         self._init_motion_lib()
         self._init_motion_extend()
         self._init_tracking_config()
@@ -439,32 +464,41 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                 self.simulator.draw_sphere(
                     pos_joint, 0.04, color_inner, env_id, pos_id)
 
-    def _reset_root_states(self, env_ids: torch.Tensor):
-        # reset root states according to the reference motion
-        """ Resets ROOT states position and velocities of selected environmments
-            Sets base position based on the curriculum
-            Selects randomized base velocities within -0.5:0.5 [m/s, rad/s]
-        Args:
-            env_ids (List[int]): Environemnt ids
+    def _reset_robot_states_callback(self, env_ids: torch.Tensor, target_states=None):
         """
-        # base position
-        if self.custom_origins:  # trimesh
-            motion_times = (self.episode_length_buf) * self.dt + \
-                self.motion_start_times  # next frames so +1
-            offset = self.env_origins
-            motion_res = self._motion_lib.get_motion_state(
-                self.motion_ids, motion_times, offset=offset, xy_scale=self._motion_xy_scale)
+        Reset robot states according to the reference motion.
+        """
+        assert target_states is None, "target_states is not supported in motion tracking"
+        motion_times = (self.episode_length_buf) * self.dt + \
+            self.motion_start_times  # next frames so +1
+        offset = self.env_origins
+        
+        # Single call to expensive get_motion_state
+        motion_res = self._motion_lib.get_motion_state(
+            self.motion_ids, motion_times, offset=offset, xy_scale=self._motion_xy_scale)
 
+        # Reset DOF states using motion result
+        dof_pos_noise = self.init_noise_scale_dof_pos * self.noise_to_initial_level
+        dof_vel_noise = self.init_noise_scale_dof_vel * self.noise_to_initial_level
+        dof_pos = motion_res['dof_pos'][env_ids]
+        dof_vel = motion_res['dof_vel'][env_ids]
+        self.simulator.dof_pos[env_ids] = dof_pos + \
+            torch.randn_like(dof_pos) * dof_pos_noise
+        self.simulator.dof_vel[env_ids] = dof_vel + \
+            torch.randn_like(dof_vel) * dof_vel_noise
+
+        # Reset root states using same motion result
+        if self.custom_origins:  # trimesh
             root_pos = motion_res['rg_pos_t'][env_ids, 0, :3]
             self.simulator.robot_root_states[env_ids, :3] = root_pos
             # self.robot_root_states[env_ids, 2] += 0.04 # in case under the terrain
-            if self.config.simulator.config.name == 'isaacgym':
+            if self.simulator_name == 'isaacgym':
                 self.simulator.robot_root_states[env_ids,
                                                  3:7] = motion_res['root_rot'][env_ids]
-            elif self.config.simulator.config.name == 'isaacsim':
+            elif self.simulator_name == 'isaacsim':
                 self.simulator.robot_root_states[env_ids, 3:7] = xyzw_to_wxyz(
                     motion_res['root_rot'][env_ids])
-            elif self.config.simulator.config.name == 'genesis':
+            elif self.simulator_name == 'genesis':
                 self.simulator.robot_root_states[env_ids,
                                                  3:7] = motion_res['root_rot'][env_ids]
                 raise NotImplementedError
@@ -472,22 +506,12 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                                              7:10] = motion_res['root_vel'][env_ids]
             self.simulator.robot_root_states[env_ids,
                                              10:13] = motion_res['root_ang_vel'][env_ids]
-
         else:
-            motion_times = (self.episode_length_buf) * self.dt + \
-                self.motion_start_times  # next frames so +1
-            offset = self.env_origins
-            motion_res = self._motion_lib.get_motion_state(
-                self.motion_ids, motion_times, offset=offset, xy_scale=self._motion_xy_scale)
-
-            root_pos_noise = self.config.init_noise_scale.root_pos * \
-                self.config.noise_to_initial_level
-            root_rot_noise = self.config.init_noise_scale.root_rot * \
-                3.14 / 180 * self.config.noise_to_initial_level
-            root_vel_noise = self.config.init_noise_scale.root_vel * \
-                self.config.noise_to_initial_level
-            root_ang_vel_noise = self.config.init_noise_scale.root_ang_vel * \
-                self.config.noise_to_initial_level
+            root_pos_noise = self.init_noise_scale_root_pos * self.noise_to_initial_level
+            root_rot_noise = self.init_noise_scale_root_rot * \
+                3.14 / 180 * self.noise_to_initial_level
+            root_vel_noise = self.init_noise_scale_root_vel * self.noise_to_initial_level
+            root_ang_vel_noise = self.init_noise_scale_root_ang_vel * self.noise_to_initial_level
 
             root_pos = motion_res['rg_pos_t'][env_ids, 0, :3]
             root_rot = motion_res['rg_rot_t'][env_ids, 0, :4]
@@ -496,16 +520,16 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
 
             self.simulator.robot_root_states[env_ids, :3] = root_pos + \
                 torch.randn_like(root_pos) * root_pos_noise
-            if self.config.simulator.config.name == 'isaacgym':
+            if self.simulator_name == 'isaacgym':
                 self.simulator.robot_root_states[env_ids, 3:7] = quat_mul(
                     self.small_random_quaternions(root_rot.shape[0], root_rot_noise), root_rot, w_last=True)
-            elif self.config.simulator.config.name == 'isaacsim':
+            elif self.simulator_name == 'isaacsim':
                 self.simulator.robot_root_states[env_ids, 3:7] = xyzw_to_wxyz(quat_mul(
                     self.small_random_quaternions(root_rot.shape[0], root_rot_noise), root_rot, w_last=True))
-            elif self.config.simulator.config.name == 'genesis':
+            elif self.simulator_name == 'genesis':
                 self.simulator.robot_root_states[env_ids, 3:7] = quat_mul(
                     self.small_random_quaternions(root_rot.shape[0], root_rot_noise), root_rot, w_last=True)
-            elif self.config.simulator.config.name == 'mujoco':
+            elif self.simulator_name == 'mujoco':
                 self.simulator.robot_root_states[env_ids, 3:7] = quat_mul(
                     self.small_random_quaternions(root_rot.shape[0], root_rot_noise), root_rot, w_last=True)
             else:
@@ -526,32 +550,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
 
         q = torch.cat([sin_half_angle * axis, cos_half_angle], dim=1)
         return q
-
-    def _reset_dofs(self, env_ids: torch.Tensor):
-        """ Resets DOF position and velocities of selected environmments
-        Positions are randomly selected within 0.5:1.5 x default positions.
-        Velocities are set to zero.
-
-        Args:
-            env_ids (List[int]): Environemnt ids
-        """
-
-        motion_times = (self.episode_length_buf) * self.dt + \
-            self.motion_start_times  # next frames so +1
-        offset = self.env_origins
-        motion_res = self._motion_lib.get_motion_state(
-            self.motion_ids, motion_times, offset=offset, xy_scale=self._motion_xy_scale)
-
-        dof_pos_noise = self.config.init_noise_scale.dof_pos * \
-            self.config.noise_to_initial_level
-        dof_vel_noise = self.config.init_noise_scale.dof_vel * \
-            self.config.noise_to_initial_level
-        dof_pos = motion_res['dof_pos'][env_ids]
-        dof_vel = motion_res['dof_vel'][env_ids]
-        self.simulator.dof_pos[env_ids] = dof_pos + \
-            torch.randn_like(dof_pos) * dof_pos_noise
-        self.simulator.dof_vel[env_ids] = dof_vel + \
-            torch.randn_like(dof_vel) * dof_vel_noise
 
     # ############################################################
 
@@ -647,11 +645,10 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
 
     def _get_obs_action_delay_one_hot(self) -> torch.Tensor:
         action_delay_idx = self.action_delay_idx
-        ctrl_delay_step_range = self.config.domain_rand.ctrl_delay_step_range
         action_delay_one_hot = torch.zeros(
-            self.num_envs, ctrl_delay_step_range[1]-ctrl_delay_step_range[0]+1, device=self.device, dtype=torch.float)
+            self.num_envs, self.ctrl_delay_step_range[1]-self.ctrl_delay_step_range[0]+1, device=self.device, dtype=torch.float)
         action_delay_one_hot[torch.arange(
-            self.num_envs), action_delay_idx-ctrl_delay_step_range[0]] = 1.0
+            self.num_envs), action_delay_idx-self.ctrl_delay_step_range[0]] = 1.0
         return action_delay_one_hot
 
     ###############################################################
@@ -668,11 +665,11 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             lower_body_diff**2).mean(dim=-1).mean(dim=-1)
 
         r_body_pos_upper = torch.exp(-diff_body_pos_dist_upper /
-                                     self.config.rewards.reward_tracking_sigma.teleop_upper_body_pos)
+                                     self.reward_tracking_sigma_teleop_upper_body_pos)
         r_body_pos_lower = torch.exp(-diff_body_pos_dist_lower /
-                                     self.config.rewards.reward_tracking_sigma.teleop_lower_body_pos)
-        r_body_pos = r_body_pos_lower * self.config.rewards.teleop_body_pos_lowerbody_weight + \
-            r_body_pos_upper * self.config.rewards.teleop_body_pos_upperbody_weight
+                                     self.reward_tracking_sigma_teleop_lower_body_pos)
+        r_body_pos = r_body_pos_lower * self.teleop_body_pos_lowerbody_weight + \
+            r_body_pos_upper * self.teleop_body_pos_upperbody_weight
 
         return r_body_pos
 
@@ -680,14 +677,14 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         velocity_diff = self.dif_global_body_vel
         diff_body_vel_dist = (velocity_diff**2).mean(dim=-1).mean(dim=-1)
         r_body_vel = torch.exp(-diff_body_vel_dist /
-                               self.config.rewards.reward_tracking_sigma.link_vel)
+                               self.reward_tracking_sigma_link_vel)
         return r_body_vel
 
     def _reward_link_ori(self):
         rotation_diff = quat_to_angle_axis(self.dif_global_body_rot)[0]
         diff_body_rot_dist = (rotation_diff**2).mean(dim=-1)
         r_body_rot = torch.exp(-diff_body_rot_dist /
-                               self.config.rewards.reward_tracking_sigma.link_ori)
+                               self.reward_tracking_sigma_link_ori)
         return r_body_rot
 
     def _reward_link_ang_vel(self):
@@ -695,21 +692,21 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         diff_body_ang_vel_dist = (
             ang_velocity_diff**2).mean(dim=-1).mean(dim=-1)
         r_body_ang_vel = torch.exp(-diff_body_ang_vel_dist /
-                                   self.config.rewards.reward_tracking_sigma.link_ang_vel)
+                                   self.reward_tracking_sigma_link_ang_vel)
         return r_body_ang_vel
 
     def _reward_joint_pos(self):
         joint_pos_diff = self.dif_joint_angles
         diff_joint_pos_dist = (joint_pos_diff**2).mean(dim=-1)
         r_joint_pos = torch.exp(-diff_joint_pos_dist /
-                                self.config.rewards.reward_tracking_sigma.joint_pos)
+                                self.reward_tracking_sigma_joint_pos)
         return r_joint_pos
 
     def _reward_joint_vel(self):
         joint_vel_diff = self.dif_joint_velocities
         diff_joint_vel_dist = (joint_vel_diff**2).mean(dim=-1)
         r_joint_vel = torch.exp(-diff_joint_vel_dist /
-                                self.config.rewards.reward_tracking_sigma.joint_vel)
+                                self.reward_tracking_sigma_joint_vel)
         return r_joint_vel
 
     def _reward_contact_alignment(self):
@@ -733,11 +730,11 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         return contact_alignment_score
 
     def setup_visualize_entities(self):
-        if self.debug_viz and self.config.simulator.config.name == "genesis":
+        if self.debug_viz and self.simulator_name == "genesis":
             num_visualize_markers = len(
                 self.config.robot.motion.visualization.marker_joint_colors)
             self.simulator.add_visualize_entities(num_visualize_markers)
-        elif self.debug_viz and self.config.simulator.config.name == "mujoco":
+        elif self.debug_viz and self.simulator_name == "mujoco":
             num_visualize_markers = len(
                 self.config.robot.motion.visualization.marker_joint_colors)
             self.simulator.add_visualize_entities(num_visualize_markers)

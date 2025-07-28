@@ -120,7 +120,7 @@ class PPO(BaseAlgo):
 
     def _setup_storage(self):
         self.storage = RolloutStorage(
-            self.env.num_envs, self.num_steps_per_env)
+            self.env.num_envs, self.num_steps_per_env, device=self.device)
         # Register obs keys
         for obs_key, obs_dim in self.algo_obs_dim_dict.items():
             self.storage.register_key(

@@ -114,6 +114,18 @@ class LeggedRobotBase(BaseTask):
         self.add_noise_currculum = self.config.obs.add_noise_currculum
         self.current_noise_curriculum_value = self.config.obs.noise_initial_value
 
+        # Cache frequently accessed config values to avoid repeated OmegaConf access in hot path
+        self.action_scale = self.config.robot.control.action_scale
+        self.control_type = self.config.robot.control.control_type
+        self.clip_torques = self.config.robot.control.clip_torques
+        self.randomize_torque_rfi = self.config.domain_rand.randomize_torque_rfi
+        self.rfi_lim = self.config.domain_rand.rfi_lim
+        # Additional frequently accessed config values
+        self.action_clip_value = self.config.robot.control.action_clip_value
+        self.randomize_ctrl_delay = self.config.domain_rand.randomize_ctrl_delay
+        self.control_decimation = self.config.simulator.config.sim.control_decimation
+        self.clip_observations = self.config.normalization.clip_observations
+
     def _domain_rand_config(self):
         if self.config.domain_rand.push_robots:
             self.push_interval_s = sample_uniform(
@@ -183,11 +195,15 @@ class LeggedRobotBase(BaseTask):
         if self.use_reward_penalty_curriculum:
             self.reward_penalty_scale = self.config.rewards.reward_initial_penalty_scale
 
+        # Cache frequently accessed reward config values to avoid repeated OmegaConf access in hot path
+        self.reward_penalty_reward_names = self.config.rewards.reward_penalty_reward_names
+        self.only_positive_rewards = self.config.rewards.only_positive_rewards
+
         logger.info(
             colored(f"Use Reward Penalty: {self.use_reward_penalty_curriculum}", "green"))
         if self.use_reward_penalty_curriculum:
             logger.info(
-                f"Penalty Reward Names: {self.config.rewards.reward_penalty_reward_names}")
+                f"Penalty Reward Names: {self.reward_penalty_reward_names}")
             logger.info(
                 f"Penalty Reward Initial Scale: {self.config.rewards.reward_initial_penalty_scale}")
 
@@ -286,15 +302,14 @@ class LeggedRobotBase(BaseTask):
         return self.obs_buf_dict, self.rew_buf, self.reset_buf, self.extras
 
     def _pre_physics_step(self, actions):
-        clip_action_limit = self.config.robot.control.action_clip_value
         self.actions = torch.clip(
-            actions, -clip_action_limit, clip_action_limit).to(self.device)
+            actions, -self.action_clip_value, self.action_clip_value).to(self.device)
 
         self.log_dict["action_clip_frac"] = (
-            self.actions.abs() == clip_action_limit
+            self.actions.abs() == self.action_clip_value
         ).sum() / self.actions.numel()
 
-        if self.config.domain_rand.randomize_ctrl_delay:
+        if self.randomize_ctrl_delay:
             self.action_queue[:, 1:] = self.action_queue[:, :-1].clone()
             self.action_queue[:, 0] = self.actions.clone()
             self.actions_after_delay = self.action_queue[torch.arange(
@@ -304,7 +319,7 @@ class LeggedRobotBase(BaseTask):
 
     def _physics_step(self):
         self.render()
-        for _ in range(self.config.simulator.config.sim.control_decimation):
+        for _ in range(self.control_decimation):
             self._apply_force_in_physics_step()
             self.simulator.simulate_at_each_physics_step()
 
@@ -345,10 +360,9 @@ class LeggedRobotBase(BaseTask):
         self._post_compute_observations_callback()
 
         # return clipped obs, clipped states (None), rewards, dones and infos
-        clip_obs = self.config.normalization.clip_observations
         for obs_key, obs_val in self.obs_buf_dict.items():
             self.obs_buf_dict[obs_key] = torch.clip(
-                obs_val, -clip_obs, clip_obs)
+                obs_val, -self.clip_observations, self.clip_observations)
 
         for key in self.history_handler.history.keys():
             self.history_handler.add(key, self.hist_obs_dict[key])
@@ -607,12 +621,12 @@ class LeggedRobotBase(BaseTask):
                 import ipdb
                 ipdb.set_trace()
             # penalty curriculum
-            if name in self.config.rewards.reward_penalty_reward_names:
-                if self.config.rewards.reward_penalty_curriculum:
+            if name in self.reward_penalty_reward_names:
+                if self.use_reward_penalty_curriculum:
                     rew *= self.reward_penalty_scale
             self.rew_buf += rew
             self.episode_sums[name] += rew
-        if self.config.rewards.only_positive_rewards:
+        if self.only_positive_rewards:
             self.rew_buf[:] = torch.clip(self.rew_buf[:], min=0.)
         # add termination reward after clipping
         if "termination" in self.reward_scales:
@@ -685,26 +699,25 @@ class LeggedRobotBase(BaseTask):
         Returns:
             [torch.Tensor]: Torques sent to the simulation
         """
-        actions_scaled = actions * self.config.robot.control.action_scale
-        control_type = self.config.robot.control.control_type
-        if control_type == "P":
+        actions_scaled = actions * self.action_scale
+        if self.control_type == "P":
             torques = self._kp_scale * self.p_gains * \
                 (actions_scaled + self.default_dof_pos - self.simulator.dof_pos) - \
                 self._kd_scale * self.d_gains*self.simulator.dof_vel
-        elif control_type == "V":
+        elif self.control_type == "V":
             torques = self._kp_scale * self.p_gains*(actions_scaled - self.simulator.dof_vel) - \
                 self._kd_scale * self.d_gains * \
                 (self.simulator.dof_vel - self.last_dof_vel)/self.sim_dt
-        elif control_type == "T":
+        elif self.control_type == "T":
             torques = actions_scaled
         else:
-            raise NameError(f"Unknown controller type: {control_type}")
+            raise NameError(f"Unknown controller type: {self.control_type}")
 
-        if self.config.domain_rand.randomize_torque_rfi:
+        if self.randomize_torque_rfi:
             torques = torques + (torch.rand_like(torques)*2.-1.) * \
-                self.config.domain_rand.rfi_lim * self._rfi_lim_scale * self.torque_limits
+                self.rfi_lim * self._rfi_lim_scale * self.torque_limits
 
-        if self.config.robot.control.clip_torques:
+        if self.clip_torques:
             return torch.clip(torques, -self.torque_limits, self.torque_limits)
 
         else:
