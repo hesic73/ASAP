@@ -33,5 +33,7 @@ setup(
         "numpy-stl",
         "open3d",
         "moviepy",
+        "viser",
+        "yourdfpy",
     ]
 )
