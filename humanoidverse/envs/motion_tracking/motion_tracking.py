@@ -130,13 +130,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         self.dif_global_body_pos = torch.zeros(
             self.num_envs, self.num_bodies + self.num_extend_bodies, 3, dtype=torch.float, device=self.device, requires_grad=False)
 
-    def start_compute_metrics(self):
-        self.compute_metrics = True
-        self.start_idx = 0
-
-    def forward_motion_samples(self):
-        pass
-
     def _init_buffers(self):
         super()._init_buffers()
         self.motion_ids = torch.arange(self.num_envs).to(self.device)
@@ -168,10 +161,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
 
         assert left_foot_idx == 0 and right_foot_idx == 1
 
-    def _init_domain_rand_buffers(self):
-        super()._init_domain_rand_buffers()
-
-    def _reset_tasks_callback(self, env_ids):
+    def _reset_tasks_callback(self, env_ids: torch.Tensor):
         if len(env_ids) == 0:
             return
         super()._reset_tasks_callback(env_ids)
@@ -205,11 +195,8 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                     f"Resampling motion at step {self.common_step_counter}")
                 self.resample_motion()
 
-    def set_is_evaluating(self):
-        super().set_is_evaluating()
-
-    def _check_termination(self):
-        super()._check_termination()
+    def _update_reset_buf(self):
+        super()._update_reset_buf()
         if self.config.termination.terminate_when_motion_far:
             reset_buf_motion_far = torch.any(torch.norm(
                 self.dif_global_body_pos, dim=-1) > self.terminate_when_motion_far_threshold, dim=-1)
@@ -220,7 +207,8 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                     self.terminate_when_motion_far_threshold, dtype=torch.float)
 
     def _update_timeout_buf(self):
-        super()._update_timeout_buf()
+        # NOTE (hsc): 相当于timeout是超过了reference motion的时长，而不是max_episode_length_s
+        # super()._update_timeout_buf()
         if self.config.termination.terminate_when_motion_end:
             current_time = (self.episode_length_buf) * \
                 self.dt + self.motion_start_times
@@ -235,7 +223,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             random_sample=False, start_idx=self.motion_start_idx)
         self.reset_all()
 
-    def _resample_motion_times(self, env_ids):
+    def _resample_motion_times(self, env_ids: torch.Tensor):
         if len(env_ids) == 0:
             return
         self.motion_len[env_ids] = self._motion_lib.get_motion_length(
@@ -246,11 +234,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         else:
             self.motion_start_times[env_ids] = self._motion_lib.sample_time(
                 self.motion_ids[env_ids])
-        # self.motion_start_times[env_ids] = self._motion_lib.sample_time(self.motion_ids[env_ids])
-        # offset = self.env_origins
-        # motion_times = (self.episode_length_buf ) * self.dt + self.motion_start_times # next frames so +1
-        # # motion_res = self._get_state_from_motionlib_cache(self.motion_ids, motion_times, offset= offset)
-        # motion_res = self._get_state_from_motionlib_cache_trimesh(self.motion_ids, motion_times, offset= offset)
 
     def resample_motion(self):
         self._motion_lib.load_motions(random_sample=True)
@@ -263,7 +246,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         B = self.motion_ids.shape[0]
         motion_times = (self.episode_length_buf + 1) * self.dt + \
             self.motion_start_times  # next frames so +1
-        # motion_res = self._get_state_from_motionlib_cache_trimesh(self.motion_ids, motion_times, offset= offset)
+
         motion_res = self._motion_lib.get_motion_state(
             self.motion_ids, motion_times, offset=offset, xy_scale=self._motion_xy_scale)
 
@@ -377,18 +360,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         self._obs_local_ref_rigid_body_vel = local_ref_rigid_body_vel_flat.view(
             env_batch_size, -1)  # (num_envs, num_rigid_bodies*3)
 
-        ###################### VR 3 point ########################
-        if "motion_tracking_link" in self.config.robot.motion:
-            ref_vr_3point_pos = ref_body_pos_extend.view(
-                env_batch_size, -1, 3)[:, self.motion_tracking_id, :]
-            vr_2root_pos = (
-                ref_vr_3point_pos - self.simulator.robot_root_states[:, 0:3].view(env_batch_size, 1, 3))
-            heading_inv_rot_vr = heading_inv_rot.repeat(3, 1)
-            self._obs_vr_3point_pos = my_quat_rotate(
-                heading_inv_rot_vr.view(-1, 4), vr_2root_pos.view(-1, 3)).view(env_batch_size, -1)
-        else:
-            self._obs_vr_3point_pos = torch.zeros(
-                env_batch_size, 0, device=self.device, dtype=torch.float)
         #################### Deepmimic phase ######################
 
         self._ref_motion_length = self._motion_lib.get_motion_length(
@@ -477,7 +448,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                 self.simulator.draw_sphere(
                     pos_joint, 0.04, color_inner, env_id, pos_id)
 
-    def _reset_root_states(self, env_ids):
+    def _reset_root_states(self, env_ids: torch.Tensor):
         # reset root states according to the reference motion
         """ Resets ROOT states position and velocities of selected environmments
             Sets base position based on the curriculum
@@ -565,7 +536,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         q = torch.cat([sin_half_angle * axis, cos_half_angle], dim=1)
         return q
 
-    def _reset_dofs(self, env_ids):
+    def _reset_dofs(self, env_ids: torch.Tensor):
         """ Resets DOF position and velocities of selected environmments
         Positions are randomly selected within 0.5:1.5 x default positions.
         Velocities are set to zero.
@@ -606,10 +577,8 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         phase = torch.pi * 2 * self._ref_motion_phase
         return torch.cat([torch.sin(phase), torch.cos(phase)], dim=-1)
 
-    def _get_obs_vr_3point_pos(self):
-        return self._obs_vr_3point_pos
-
     ######################### Observations #########################
+
     def _get_obs_history_actor(self) -> torch.Tensor:
         assert "history_actor" in self.config.obs.obs_auxiliary.keys()
         history_config = self.config.obs.obs_auxiliary['history_actor']

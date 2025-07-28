@@ -25,7 +25,7 @@ rewards:
       # better for landing
       penalty_feet_ori: -2.0
       feet_heading_alignment: -0.1
-      penalty_slippage: -1.0
+      penalty_slippage: -10.0
 
       limits_dof_pos: -10.0
       limits_dof_vel: -5.0
@@ -33,7 +33,7 @@ rewards:
       termination: -200.0
       # feet_max_height_for_this_air: -100.0
 
-      contact_alignment: 2.0
+      contact_alignment: 1.0
       
 
   teleop_body_pos_lowerbody_weight : 0.5
