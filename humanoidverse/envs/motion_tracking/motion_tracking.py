@@ -544,6 +544,9 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
 
     def _reset_root_states_callback_default_no_noise(self, env_ids: torch.Tensor):
         self.simulator.robot_root_states[env_ids] = self.base_init_state
+        if self.simulator_name == "isaacsim":
+            self.simulator.robot_root_states[env_ids, 3:7] = xyzw_to_wxyz(self.simulator.robot_root_states[env_ids, 3:7])
+
         self.simulator.robot_root_states[env_ids,:3] += self.env_origins[env_ids]
         self.simulator.dof_pos[env_ids] = self.default_dof_pos
         self.simulator.dof_vel[env_ids] = 0.

@@ -1,5 +1,4 @@
 import numpy as np
-from isaacgym import gymapi
 from humanoidverse.agents.callbacks.base_callback import RL_EvalCallback
 from humanoidverse.envs.legged_base_task.legged_robot_base import LeggedRobotBase
 from humanoidverse.agents.ppo.ppo import PPO

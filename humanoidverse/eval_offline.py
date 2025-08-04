@@ -78,7 +78,7 @@ def main(override_config: OmegaConf):
 
     simulator_type = config.simulator['_target_'].split('.')[-1]
     if simulator_type == 'IsaacSim':
-        from omni.isaac.lab.app import AppLauncher
+        from isaaclab.app import AppLauncher
         import argparse
         parser = argparse.ArgumentParser(
             description="Evaluate an RL agent with RSL-RL.")
@@ -91,6 +91,7 @@ def main(override_config: OmegaConf):
         args_cli.env_spacing = config.env.config.env_spacing
         args_cli.output_dir = config.output_dir
         args_cli.headless = config.headless
+        args_cli.enable_cameras = config.enable_cameras
 
         app_launcher = AppLauncher(args_cli)
         simulation_app = app_launcher.app
@@ -158,7 +159,11 @@ def main(override_config: OmegaConf):
         logger.info(
             f'Exported policy as onnx to: {os.path.join(exported_policy_path, exported_onnx_name)}')
 
-    algo.evaluate_policy(max_steps=300)
+    try:
+        algo.evaluate_policy(max_steps=300)
+    finally:
+        if config.simulator.config.name == "isaacsim":
+            simulation_app.close()
 
 
 if __name__ == "__main__":
