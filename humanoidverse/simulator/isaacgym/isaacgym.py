@@ -421,11 +421,8 @@ class IsaacGym(BaseSimulator):
         # randomize base mass
         if self.env_config.domain_rand.randomize_base_mass:
             rng = self.env_config.domain_rand.added_mass_range
-            try:
-                # for fixed upper URDF we only have pelvis link
-                base_index = self._body_list.index("pelvis")
-            except:
-                base_index = self._body_list.index("torso_link")
+            # NOTE (hsc): 这里我做了breaking change，base用torso_link而不是pelvis
+            base_index = self._body_list.index("torso_link")
             assert base_index != -1
             # raise Exception("index 0 is for world, 13 is for torso!")
             # raise NotImplementedError

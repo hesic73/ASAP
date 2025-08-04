@@ -6,27 +6,25 @@ from humanoidverse.utils.torch_utils import to_torch, torch_rand_float
 import numpy as np
 from humanoidverse.simulator.base_simulator.base_simulator import BaseSimulator
 # from humanoidverse.simulator.isaaclab_cfg import IsaacLabCfg
-from omni.isaac.lab.sim import SimulationContext
-from omni.isaac.lab.sim import PhysxCfg, SimulationCfg
-from omni.isaac.lab.scene import InteractiveSceneCfg
-from omni.isaac.lab.scene import InteractiveScene
-from omni.isaac.lab.utils.timer import Timer
+from isaaclab.sim import SimulationContext
+from isaaclab.sim import PhysxCfg, SimulationCfg
+from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.scene import InteractiveScene
+from isaaclab.utils.timer import Timer
 
-from omni.isaac.lab.assets import Articulation
-from omni.isaac.lab.sensors import ContactSensor, RayCaster
-from omni.isaac.lab.actuators import IdealPDActuatorCfg, ImplicitActuatorCfg
-from omni.isaac.lab.sensors import ContactSensorCfg, RayCasterCfg, patterns
-from omni.isaac.lab.assets import ArticulationCfg
-from omni.isaac.lab.terrains import TerrainImporterCfg
-from omni.isaac.lab.terrains.config.rough import ROUGH_TERRAINS_CFG
-from omni.isaac.lab.terrains import TerrainGeneratorCfg
-import omni.isaac.lab.terrains as terrain_gen
+from isaaclab.assets import Articulation
+from isaaclab.sensors import ContactSensor, RayCaster
+from isaaclab.actuators import IdealPDActuatorCfg, ImplicitActuatorCfg
+from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
+from isaaclab.assets import ArticulationCfg
+from isaaclab.terrains import TerrainImporterCfg
+from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
+from isaaclab.terrains import TerrainGeneratorCfg
+import isaaclab.terrains as terrain_gen
 
-from omni.isaac.lab_assets import H1_CFG
-from omni.isaac.lab.utils.assets import ISAACLAB_NUCLEUS_DIR
-from omni.isaac.lab.envs import ViewerCfg
+from isaaclab.envs import ViewerCfg
 
-import omni.isaac.lab.sim as sim_utils
+import isaaclab.sim as sim_utils
 
 from humanoidverse.simulator.isaacsim.isaaclab_viewpoint_camera_controller import ViewportCameraController
 import builtins
@@ -36,12 +34,12 @@ from humanoidverse.simulator.isaacsim.isaacsim_articulation_cfg import ARTICULAT
 
 from humanoidverse.simulator.isaacsim.event_cfg import EventCfg
 
-from omni.isaac.lab.managers import EventManager
+from isaaclab.managers import EventManager
 
-from omni.isaac.lab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import EventTermCfg as EventTerm
 
-from omni.isaac.lab.managers import SceneEntityCfg
-import omni.isaac.lab.envs.mdp as mdp
+from isaaclab.managers import SceneEntityCfg
+import isaaclab.envs.mdp as mdp
 from humanoidverse.simulator.isaacsim.events import randomize_body_com
 
 
@@ -163,11 +161,52 @@ class IsaacSim(BaseSimulator):
                 },
             )
 
+        if self.domain_rand_config.get("randomize_base_mass", False):
+            rng = self.env_config.domain_rand.added_mass_range
+            self.events_cfg.random_base_mass = EventTerm(
+                func=mdp.randomize_rigid_body_mass,
+                mode="startup",
+                params={
+                    "asset_cfg": SceneEntityCfg("robot", body_names=["torso_link"]),
+                    "mass_distribution_params": rng,
+                    "operation": "add",
+                },
+            )
+
         self.event_manager = EventManager(self.events_cfg, self)
         print("[INFO] Event Manager: ", self.event_manager)
 
         if "startup" in self.event_manager.available_modes:
             self.event_manager.apply(mode="startup")
+
+
+        self.robot=self.scene.articulations["robot"]
+        self.torso_link_id, _=self.robot.find_bodies("torso_link")
+        assert len(self.torso_link_id)==1
+        self.torso_link_id=self.torso_link_id[0]
+
+        if self.domain_rand_config.get("randomize_base_com", False):
+            self._base_com_bias = torch.zeros(
+                self.num_envs, 3, dtype=torch.float, device=self.sim_device, requires_grad=False)
+            coms = self.robot.root_physx_view.get_coms()  # (N, n_links, 7)
+            torso_coms = coms[:, self.torso_link_id, :3]  # (N, 3)
+            self._base_com_bias[:, :] = torso_coms
+            self._base_com_bias=self._base_com_bias.to(self.sim_device)
+
+        if self.domain_rand_config.get("randomize_base_mass", False):
+            self._base_mass_bias = torch.zeros(
+                self.num_envs, 1, dtype=torch.float, device=self.sim_device, requires_grad=False)
+            masses = self.robot.root_physx_view.get_masses()
+            torso_mass = masses[:, self.torso_link_id]
+            self._base_mass_bias[:, :] = torso_mass
+            self._base_mass_bias=self._base_mass_bias.to(self.sim_device)
+
+        if self.domain_rand_config.get("randomize_friction", False):
+            material_properties = self.robot.root_physx_view.get_material_properties()
+            self._ground_friction_values = torch.zeros(
+                self.num_envs, self.num_bodies, dtype=torch.float, device=self.sim_device, requires_grad=False)
+            self._ground_friction_values[:, :] = material_properties[:, 0, :]
+            self._ground_friction_values=self._ground_friction_values.to(self.sim_device)
 
         # -- event manager used for randomization
         # if self.cfg.events:
@@ -250,11 +289,9 @@ class IsaacSim(BaseSimulator):
         # }
         asset_root = self.robot_config.asset.asset_root
         asset_path = self.robot_config.asset.usd_file
-        # prapare to override the spawn configuration in HumanoidVerse/humanoidverse/simulator/isaacsim_articulation_cfg.py
-        from omni.isaac.lab.utils.assets import ISAACLAB_NUCLEUS_DIR
+
         spawn = sim_utils.UsdFileCfg(
             usd_path=os.path.join(asset_root, asset_path),
-            # usd_path=f"{ISAACLAB_NUCLEUS_DIR}/Robots/Unitree/H1/h1.usd",
             activate_contact_sensors=True,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 disable_gravity=False,
@@ -317,68 +354,6 @@ class IsaacSim(BaseSimulator):
                 friction=dof_joint_friction_list[i],
             ) for i in range(len(dof_names_list))
         }
-        # import ipdb; ipdb.set_trace()
-        # actuators = {
-        #     dof_names_list[i]: ImplicitActuatorCfg(
-        #         joint_names_expr=[dof_names_list[i]],
-        #         effort_limit=dof_effort_limit_list[i],
-        #         velocity_limit=dof_vel_limit_list[i],
-        #         stiffness=kp_list[i],
-        #         damping=kd_list[i],
-        #     ) for i in range(len(dof_names_list))
-        # }
-
-        # actuators={
-        # "legs": ImplicitActuatorCfg(
-        #     joint_names_expr=[".*_hip_yaw_joint", ".*_hip_roll_joint", ".*_hip_pitch_joint", ".*_knee_joint", "torso_joint"],
-        #     effort_limit=300,
-        #     velocity_limit=100.0,
-        #     stiffness={
-        #         ".*_hip_yaw_joint": 150.0,
-        #         ".*_hip_roll_joint": 150.0,
-        #         ".*_hip_pitch_joint": 200.0,
-        #         ".*_knee_joint": 200.0,
-        #         "torso_joint": 200.0,
-        #     },
-        #     damping={
-        #         ".*_hip_yaw_joint": 5.0,
-        #         ".*_hip_roll_joint": 5.0,
-        #         ".*_hip_pitch_joint": 5.0,
-        #         ".*_knee_joint": 5.0,
-        #         "torso_joint": 5.0,
-        #     },
-        # ),
-        # "feet": ImplicitActuatorCfg(
-        #     joint_names_expr=[".*_ankle_joint"],
-        #     effort_limit=100,
-        #     velocity_limit=100.0,
-        #     stiffness={".*_ankle_joint": 20.0},
-        #     damping={".*_ankle_joint": 4.0},
-        # ),
-        # "arms": ImplicitActuatorCfg(
-        #     joint_names_expr=[".*_shoulder_pitch_joint", ".*_shoulder_roll_joint", ".*_shoulder_yaw_joint", ".*_elbow_joint"],
-        #     effort_limit=300,
-        #     velocity_limit=100.0,
-        #     stiffness={
-        #         ".*_shoulder_pitch_joint": 40.0,
-        #         ".*_shoulder_roll_joint": 40.0,
-        #         ".*_shoulder_yaw_joint": 40.0,
-        #         ".*_elbow_joint": 40.0,
-        #     },
-        #     damping={
-        #         ".*_shoulder_pitch_joint": 10.0,
-        #         ".*_shoulder_roll_joint": 10.0,
-        #         ".*_shoulder_yaw_joint": 10.0,
-        #         ".*_elbow_joint": 10.0,
-        #     },
-        # )
-        # }
-
-        # import ipdb; ipdb.set_trace()
-        # robot_articulation_config: ArticulationCfg = ARTICULATION_CFG.replace(prim_path="/World/envs/env_.*/Robot", spawn=spawn, init_state=init_state, actuators=actuators)
-        # robot_articulation_config: ArticulationCfg = ARTICULATION_CFG.replace(prim_path="/World/envs/env_.*/Robot", actuators=actuators)
-        # robot_articulation_config: ArticulationCfg = H1_CFG.replace(prim_path="/World/envs/env_.*/Robot", actuators=actuators)
-        # robot_articulation_config: ArticulationCfg = ARTICULATION_CFG.replace(prim_path="/World/envs/env_.*/Robot", spawn=spawn, init_state=init_state, actuators=actuators)
         robot_articulation_config: ArticulationCfg = ARTICULATION_CFG.replace(
             prim_path="/World/envs/env_.*/Robot", spawn=spawn, init_state=init_state, actuators=actuators)
 

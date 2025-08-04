@@ -21,7 +21,7 @@ def main(config: OmegaConf):
     simulator_type = config.simulator['_target_'].split('.')[-1]
     # import ipdb; ipdb.set_trace()
     if simulator_type == 'IsaacSim':
-        from omni.isaac.lab.app import AppLauncher
+        from isaaclab.app import AppLauncher
         import argparse
         parser = argparse.ArgumentParser(
             description="Train an RL agent with RSL-RL.")
