@@ -23,3 +23,8 @@ algo:
         _target_: humanoidverse.agents.callbacks.save_motion.SaveMotionCallback
         config:
           motion_name: "refined"
+
+      debug_print:
+        _target_: humanoidverse.agents.callbacks.debug_print.DebugPrintCallback
+        config:
+

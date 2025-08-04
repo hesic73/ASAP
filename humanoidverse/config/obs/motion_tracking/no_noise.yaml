@@ -1,0 +1,22 @@
+obs:
+  noise_scales: {
+    base_lin_vel: 0.0,
+    base_ang_vel: 0.0,
+    projected_gravity: 0.0,
+    dof_pos: 0.0,
+    dof_vel: 0.0,
+    actions: 0.0,
+    dif_local_rigid_body_pos: 0.0,
+    local_ref_rigid_body_pos: 0.0,
+    ref_motion_phase: 0.0,
+    history_actor: 0.0,
+    history_critic: 0.0,
+    com_bias: 0.0,
+    base_mass_bias: 0.0,
+    kp_scale: 0.0,
+    kd_scale: 0.0,
+    ground_friction_values: 0.0,
+    current_foot_contacts: 0.0,
+    ref_foot_contacts: 0.0,
+    action_delay_one_hot: 0.0,
+  }

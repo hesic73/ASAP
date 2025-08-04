@@ -21,6 +21,7 @@ from humanoid_sim2sim.utils.mujoco_utils import (
     get_ordered_joint_indices,
     initialize_robot_state,
     set_free_joint_pose,
+    get_pose,
 )
 from humanoid_sim2sim.utils.controller import LowLevelPDController
 
@@ -209,6 +210,7 @@ def main(cfg: DictConfig) -> None:
 
     # Get base link name from config
     base_link_name = cfg.robot.base_link_name
+    feet_link_names = ['left_ankle_roll_link', 'right_ankle_roll_link']
 
     # Simulation parameters from config
     total_time = cfg.total_time
@@ -265,6 +267,12 @@ def main(cfg: DictConfig) -> None:
             target_dof_pos = action * action_scale + initial_joint_pos
 
             last_action = action.copy()
+
+            if cfg.get("debug_print", False):
+                left_foot_pos = get_pose(feet_link_names[0], data)[:3]
+                right_foot_pos = get_pose(feet_link_names[1], data)[:3]
+                print(f"left_foot_pos: {left_foot_pos}")
+                print(f"right_foot_pos: {right_foot_pos}")
 
             if cfg.show_reference_motion and num_markers > 0:
                 ref_motion_state = motion_lib.get_motion_state(

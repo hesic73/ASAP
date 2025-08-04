@@ -469,6 +469,10 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         Reset robot states according to the reference motion.
         """
         assert target_states is None, "target_states is not supported in motion tracking"
+
+        if self.config.get("reset_default_no_noise", False):
+            return self._reset_root_states_callback_default_no_noise(env_ids)
+        
         motion_times = (self.episode_length_buf) * self.dt + \
             self.motion_start_times  # next frames so +1
         offset = self.env_origins
@@ -538,6 +542,12 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                 torch.randn_like(root_vel) * root_vel_noise
             self.simulator.robot_root_states[env_ids, 10:13] = root_ang_vel + \
                 torch.randn_like(root_ang_vel) * root_ang_vel_noise
+
+    def _reset_root_states_callback_default_no_noise(self, env_ids: torch.Tensor):
+        self.simulator.robot_root_states[env_ids] = self.base_init_state
+        self.simulator.robot_root_states[env_ids,:3] += self.env_origins[env_ids]
+        self.simulator.dof_pos[env_ids] = self.default_dof_pos
+        self.simulator.dof_vel[env_ids] = 0.
 
     def small_random_quaternions(self, n, max_angle):
         axis = torch.randn((n, 3), device=self.device)

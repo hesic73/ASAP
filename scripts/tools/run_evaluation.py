@@ -9,6 +9,7 @@ from loguru import logger
 def run_evaluation(
     log_dir: str,
     n_epochs: int = None,
+    isaacgym_obs_no_noise: bool = False,
     use_xvfb: bool = False,
     enforce_randomize_motion_start_eval: bool = False,
 ):
@@ -82,11 +83,15 @@ def run_evaluation(
     eval_command = [
         "python", "humanoidverse/eval_offline.py",
         f"+device={device}",
-        f"+domain_rand=NO_domain_rand",  # disable domain randomization
+        "+domain_rand=NO_domain_rand",  # disable domain randomization
         "+opt=my_eval_callbacks",
         f"+checkpoint={checkpoint_path}",
         f"algo.config.eval_callbacks.offline_rendering.config.video_filename={isaacgym_video_path}"
     ]
+
+    if isaacgym_obs_no_noise:
+        eval_command.append(
+            "+obs=motion_tracking/no_noise")
 
     if use_xvfb:
         logger.info("Using xvfb...")
@@ -98,6 +103,7 @@ def run_evaluation(
         eval_command.append(
             "+env.config.enforce_randomize_motion_start_eval=True")
 
+    logger.info(f"Running command:\n{' '.join(eval_command)}")
     subprocess.run(eval_command, check=True)
     logger.info("Offline evaluation complete.")
 
@@ -115,6 +121,8 @@ def run_evaluation(
         f"robot.motion.motion_file={motion_file}",
         f"robot.motion.xy_scale={motion_xy_scale}"
     ]
+
+    logger.info(f"Running command:\n{' '.join(sim_command)}")
     subprocess.run(sim_command, check=True)
     logger.info(
         f"Motion simulation and video generation complete. Video saved to: {mujoco_video_path}")
