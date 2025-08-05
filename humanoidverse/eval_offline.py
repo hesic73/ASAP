@@ -121,7 +121,17 @@ def main(override_config: OmegaConf):
         checkpoint.parent / "renderings" / f"ckpt_{ckpt_num}")
     # commented out for now, might need it back to save motion
     config.env.config.ckpt_dir = str(checkpoint.parent)
-    env = instantiate(config.env, device=device)
+    if simulator_type == "Genesis":
+        def _pre_create_envs_callback(env):
+            scene = env.simulator.scene
+            scene.add_camera(
+                res=(1080, 1920),
+                fov=90,
+                GUI=False,
+            )
+    else:
+        _pre_create_envs_callback = None
+    env = instantiate(config.env, device=device, _pre_create_envs_callback=_pre_create_envs_callback)
 
     algo: BaseAlgo = instantiate(
         config.algo, env=env, device=device, log_dir=None)

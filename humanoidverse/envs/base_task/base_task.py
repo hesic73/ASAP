@@ -19,7 +19,7 @@ from termcolor import colored
 
 
 class BaseTask():
-    def __init__(self, config, device):
+    def __init__(self, config, device, _pre_create_envs_callback=None):
         self.config = config
         # optimization flags for pytorch JIT
         torch._C._jit_set_profiling_mode(False)
@@ -53,6 +53,9 @@ class BaseTask():
         # create envs, sim and viewer
         self._load_assets()
         self._get_env_origins()
+        # NOTE (hsc): motivation是，Genesis需要在scene build前添加camera
+        if _pre_create_envs_callback is not None:
+            _pre_create_envs_callback(self)
         self._create_envs()
         self.dof_pos_limits, self.dof_vel_limits, self.torque_limits = self.simulator.get_dof_limits_properties()
         self._setup_robot_body_indices()
@@ -74,7 +77,7 @@ class BaseTask():
         ###########################################################################
         # self.gym = self.simulator.gym
         # self.sim = self.simulator.sim
-        if self.headless == False:
+        if not self.headless:
             self.viewer = self.simulator.viewer
 
     def _init_buffers(self):

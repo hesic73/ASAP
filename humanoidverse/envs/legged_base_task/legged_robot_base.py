@@ -25,9 +25,9 @@ import copy
 
 
 class LeggedRobotBase(BaseTask):
-    def __init__(self, config, device):
+    def __init__(self, config, device, *args, **kwargs):
         self.init_done = False
-        super().__init__(config, device)
+        super().__init__(config, device, *args, **kwargs)
         self._domain_rand_config()
         self._prepare_reward_function()
         self.history_handler = HistoryHandler(

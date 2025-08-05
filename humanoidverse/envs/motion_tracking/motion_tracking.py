@@ -30,13 +30,13 @@ import joblib
 
 
 class LeggedRobotMotionTracking(LeggedRobotBase):
-    def __init__(self, config, device):
+    def __init__(self, config, device, *args, **kwargs):
         self.init_done = False
         self.debug_viz = True
 
 
         self.simulator_name = config.simulator.config.name
-        super().__init__(config, device)
+        super().__init__(config, device, *args, **kwargs)
 
         # Cache frequently accessed config values to avoid repeated OmegaConf access in hot path
         
