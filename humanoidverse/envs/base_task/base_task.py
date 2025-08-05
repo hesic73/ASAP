@@ -60,7 +60,7 @@ class BaseTask():
         self.simulator.prepare_sim()
         # if running with a viewer, set up keyboard shortcuts and camera
         self.viewer = None
-        if self.headless == False:
+        if not self.headless:
             self.debug_viz = False
             self.simulator.setup_viewer()
             ###########################################################################
