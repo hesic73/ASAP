@@ -99,7 +99,7 @@ class PPO(BaseAlgo):
         # import ipdb; ipdb.set_trace()
         logger.info("Setting up PPO")
         self._setup_models_and_optimizer()
-        logger.info(f"Setting up Storage")
+        logger.info("Setting up Storage")
         self._setup_storage()
 
     def _setup_models_and_optimizer(self):
@@ -165,10 +165,9 @@ class PPO(BaseAlgo):
                 self.critic_learning_rate = loaded_dict['critic_optimizer_state_dict']['param_groups'][0]['lr']
                 self.set_learning_rate(
                     self.actor_learning_rate, self.critic_learning_rate)
-                logger.info(f"Optimizer loaded from checkpoint")
+                logger.info("Optimizer loaded from checkpoint")
                 logger.info(f"Actor Learning rate: {self.actor_learning_rate}")
-                logger.info(
-                    f"Critic Learning rate: {self.critic_learning_rate}")
+                logger.info(f"Critic Learning rate: {self.critic_learning_rate}")
             self.current_learning_iteration = loaded_dict["iter"]
             return loaded_dict["infos"]
 

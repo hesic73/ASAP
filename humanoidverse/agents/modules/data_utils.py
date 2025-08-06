@@ -1,6 +1,8 @@
 import torch
 from torch import nn, Tensor
 
+from typing import Dict, List, Tuple, Any, Union
+
 
 def compute_returns(self, rewards, values, dones, last_values, gamma, lam):
     advantage = 0
@@ -11,8 +13,9 @@ def compute_returns(self, rewards, values, dones, last_values, gamma, lam):
         else:
             next_values = values[step + 1]
         next_is_not_terminal = 1.0 - dones[step].float()
-        delta = rewards[step] + next_is_not_terminal * \
-            gamma * next_values - values[step]
+        delta = (
+            rewards[step] + next_is_not_terminal * gamma * next_values - values[step]
+        )
         advantage = delta + next_is_not_terminal * gamma * lam * advantage
         returns[step] = advantage + values[step]
 
@@ -22,9 +25,7 @@ def compute_returns(self, rewards, values, dones, last_values, gamma, lam):
 
 
 class RolloutStorage(nn.Module):
-
-    def __init__(self, num_envs, num_transitions_per_env, device='cpu'):
-
+    def __init__(self, num_envs, num_transitions_per_env, device="cpu"):
         super().__init__()
 
         self.device = device
@@ -42,10 +43,11 @@ class RolloutStorage(nn.Module):
     def register_key(self, key: str, shape=(), dtype=torch.float):
         # This class was partially copied from https://github.com/NVlabs/ProtoMotions/blob/94059259ba2b596bf908828cc04e8fc6ff901114/phys_anim/agents/utils/data_utils.py
         assert not hasattr(self, key), key
-        assert isinstance(shape, (list, tuple)
-                          ), "shape must be a list or tuple"
+        assert isinstance(shape, (list, tuple)), "shape must be a list or tuple"
         buffer = torch.zeros(
-            (self.num_transitions_per_env, self.num_envs) + shape, dtype=dtype, device=self.device
+            (self.num_transitions_per_env, self.num_envs) + shape,
+            dtype=dtype,
+            device=self.device,
         )
         self.register_buffer(key, buffer, persistent=False)
         self.stored_keys.append(key)
@@ -70,17 +72,31 @@ class RolloutStorage(nn.Module):
         if hidden_states is None or hidden_states == (None, None):
             return
         # make a tuple out of GRU hidden state sto match the LSTM format
-        hid_a = hidden_states[0] if isinstance(
-            hidden_states[0], tuple) else (hidden_states[0],)
-        hid_c = hidden_states[1] if isinstance(
-            hidden_states[1], tuple) else (hidden_states[1],)
+        hid_a = (
+            hidden_states[0]
+            if isinstance(hidden_states[0], tuple)
+            else (hidden_states[0],)
+        )
+        hid_c = (
+            hidden_states[1]
+            if isinstance(hidden_states[1], tuple)
+            else (hidden_states[1],)
+        )
 
         # initialize if needed
         if self.saved_hidden_states_a is None:
-            self.saved_hidden_states_a = [torch.zeros(
-                self.observations.shape[0], *hid_a[i].shape, device=self.device) for i in range(len(hid_a))]
-            self.saved_hidden_states_c = [torch.zeros(
-                self.observations.shape[0], *hid_c[i].shape, device=self.device) for i in range(len(hid_c))]
+            self.saved_hidden_states_a = [
+                torch.zeros(
+                    self.observations.shape[0], *hid_a[i].shape, device=self.device
+                )
+                for i in range(len(hid_a))
+            ]
+            self.saved_hidden_states_c = [
+                torch.zeros(
+                    self.observations.shape[0], *hid_c[i].shape, device=self.device
+                )
+                for i in range(len(hid_c))
+            ]
         # copy the states
         for i in range(len(hid_a)):
             self.saved_hidden_states_a[i][self.step].copy_(hid_a[i])
@@ -94,9 +110,13 @@ class RolloutStorage(nn.Module):
         done = self.dones
         done[-1] = 1
         flat_dones = done.permute(1, 0, 2).reshape(-1, 1)
-        done_indices = torch.cat((flat_dones.new_tensor(
-            [-1], dtype=torch.int64), flat_dones.nonzero(as_tuple=False)[:, 0]))
-        trajectory_lengths = (done_indices[1:] - done_indices[:-1])
+        done_indices = torch.cat(
+            (
+                flat_dones.new_tensor([-1], dtype=torch.int64),
+                flat_dones.nonzero(as_tuple=False)[:, 0],
+            )
+        )
+        trajectory_lengths = done_indices[1:] - done_indices[:-1]
         return trajectory_lengths.float().mean(), self.rewards.mean()
 
     def query_key(self, key: str):
@@ -107,18 +127,108 @@ class RolloutStorage(nn.Module):
         batch_size = self.num_envs * self.num_transitions_per_env
         mini_batch_size = batch_size // num_mini_batches
         indices = torch.randperm(
-            num_mini_batches*mini_batch_size, requires_grad=False, device=self.device)
+            num_mini_batches * mini_batch_size, requires_grad=False, device=self.device
+        )
 
-        _buffer_dict = {key: getattr(self, key)[:].flatten(
-            0, 1) for key in self.stored_keys}
+        _buffer_dict = {
+            key: getattr(self, key)[:].flatten(0, 1) for key in self.stored_keys
+        }
 
         for epoch in range(num_epochs):
             for i in range(num_mini_batches):
-
-                start = i*mini_batch_size
-                end = (i+1)*mini_batch_size
+                start = i * mini_batch_size
+                end = (i + 1) * mini_batch_size
                 batch_idx = indices[start:end]
 
                 _batch_buffer_dict = {
-                    key: _buffer_dict[key][batch_idx] for key in self.stored_keys}
+                    key: _buffer_dict[key][batch_idx] for key in self.stored_keys
+                }
                 yield _batch_buffer_dict
+
+
+# Reference:
+# - https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl_utils/buffers.py
+class ReplayBuffer:
+    def __init__(
+        self,
+        buffer_size: int,
+        num_envs: int,
+        device: torch.device = torch.device("cpu"),
+    ):
+        self._buffer_size = max(buffer_size // num_envs, 1)
+        self.num_envs = num_envs
+        self.device = device
+
+        self._buffer_dict: Dict[str, Tensor] = {}
+        self._buffer_dict_shape: Dict[str, Tuple[int, ...]] = {}
+        self._buffer_dict_is_obs: Dict[str, bool] = {}
+
+        self._pos = 0
+        self._full = False
+
+    def register_key(
+        self,
+        key: str,
+        shape: Union[Tuple[int, ...], List[int], int],
+        dtype: torch.dtype = torch.float,
+        is_obs: bool = False,
+    ):
+        assert key not in self._buffer_dict, f"Key {key} already registered"
+        if isinstance(shape, int):
+            shape = (shape,)
+        assert isinstance(shape, (list, tuple)), "shape must be a list or tuple"
+        self._buffer_dict[key] = torch.zeros(
+            (self._buffer_size, self.num_envs) + shape,
+            dtype=dtype,
+            device=self.device,
+        )
+        self._buffer_dict_shape[key] = shape
+        self._buffer_dict_is_obs[key] = is_obs
+
+    def size(self) -> int:
+        if self._full:
+            return self._buffer_size
+        return self._pos
+
+    def reset(self):
+        self._pos = 0
+        self._full = False
+
+    def add(self, data_dict: Dict[str, Tensor]):
+        for key, data in data_dict.items():
+            assert key in self._buffer_dict, f"Key {key} not registered"
+            expected_shape = (self.num_envs, *self._buffer_dict_shape[key])
+            assert data.shape == expected_shape, (
+                f"{key} data shape {data.shape} does not match buffer shape. Expected {expected_shape}"
+            )
+            self._buffer_dict[key][self._pos] = data
+        self._pos += 1
+        if self._pos == self._buffer_size:
+            self._full = True
+            self._pos = 0
+
+    def sample(self, batch_size: int) -> Tuple[Dict[str, Tensor], Dict[str, Tensor]]:
+        if self._full:
+            batch_inds = (
+                torch.randint(1, self._buffer_size, (batch_size,), device=self.device)
+                + self._pos
+            ) % self._buffer_size
+        else:
+            batch_inds = torch.randint(0, self._pos, (batch_size,), device=self.device)
+
+        env_indices = torch.randint(0, self.num_envs, (batch_size,), device=self.device)
+
+        current_samples = {
+            key: self._buffer_dict[key][batch_inds, env_indices]
+            for key in self._buffer_dict.keys()
+        }
+
+        next_indices = (batch_inds + 1) % self._buffer_size
+
+        next_obs_samples = {
+            key: self._buffer_dict[key][next_indices, env_indices]
+            for key, is_obs in self._buffer_dict_is_obs.items()
+            if is_obs
+        }
+
+        return current_samples, next_obs_samples

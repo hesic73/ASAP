@@ -1,0 +1,49 @@
+# @package _global_
+
+algo:
+  _target_: humanoidverse.agents.sac.sac.SAC
+  _recursive_: False
+  config:
+    # SAC specific parameters
+    replay_buffer_size: 50000
+    batch_size: 256
+    learning_starts: 25000
+    learning_frequency: 1
+    target_update_frequency: 1
+    tau: 0.01
+    gamma: 0.99
+    
+    # Learning rates
+    actor_learning_rate: 0.0003
+    critic_learning_rate: 0.0003
+    alpha_learning_rate: 0.0003
+    
+    # Entropy temperature target
+    target_entropy: -1.0
+    
+    # Training parameters - NEW for off-policy modification
+    samples_per_iter: 512
+    actor_steps: 256
+    critic_steps: 256
+    
+    # General training config
+    num_learning_iterations: 100000
+    init_noise_std: 0.2
+    
+    eval_callbacks: null
+
+    module_dict:
+      actor: 
+        input_dim: [actor_obs]
+        output_dim: [robot_action_dim]
+        layer_config:
+          type: MLP
+          hidden_dims: [512, 256, 128]
+          activation: ELU
+      critic: 
+        input_dim: [critic_obs, robot_action_dim]
+        output_dim: [1]
+        layer_config:
+          type: MLP
+          hidden_dims: [768, 256, 128]
+          activation: ELU
