@@ -6,21 +6,21 @@ algo:
   config:
     # SAC specific parameters
     replay_buffer_size: 1e6
-    batch_size: 256
-    learning_starts: 5000
+    batch_size: 1024
+    learning_starts: 25000
     learning_frequency: 1
     target_update_frequency: 1
-    tau: 0.01
+    tau: 0.005
     gamma: 0.99
     
     # Learning rates
-    actor_learning_rate: 0.0003
-    critic_learning_rate: 0.0003
-    alpha_learning_rate: 0.0003
+    actor_learning_rate: 3e-5
+    critic_learning_rate: 3e-5
+    alpha_learning_rate: 3e-5
     
     # Entropy regularization
     autotune_alpha: false  # Set to true for automatic alpha tuning
-    alpha: 0.2  # Fixed alpha value (used when autotune_alpha is false)
+    alpha: 0.05  # Fixed alpha value (used when autotune_alpha is false)
     target_entropy: "auto"  # Target entropy for autotuning (auto = -action_dim)
     
     # Training parameters

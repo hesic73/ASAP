@@ -182,7 +182,7 @@ class SAC(BaseAlgo):
         # Collect initial samples if needed
         if self.replay_buffer.size() < self.learning_starts:
             logger.info(f"Collecting {self.learning_starts} initial samples")
-            self._collect_initial_samples(obs_dict)
+            self._collect_initial_samples(obs_dict, self.learning_starts)
 
         for iteration in range(
             self.current_learning_iteration,
@@ -191,15 +191,17 @@ class SAC(BaseAlgo):
             self.start_time = time.time()
 
             # Collect samples_per_iter samples with online training
-            obs_dict, loss_dict, collection_time, learn_time = self._collect_and_train_online(
+            obs_dict, loss_dict, info_dict = self._collect_and_train_online(
                 obs_dict, self.samples_per_iter)
 
             # Logging
             log_dict = {
                 'it': iteration,
                 'loss_dict': loss_dict,
-                'collection_time': collection_time,
-                'learn_time': learn_time,
+                'collection_time': info_dict['collection_time'],
+                'learn_time': info_dict['learn_time'],
+                'training_steps': info_dict['training_steps'],
+                'buffer_size': info_dict['buffer_size'],
                 'ep_infos': self.ep_infos,
                 'rewbuffer': self.rewbuffer,
                 'lenbuffer': self.lenbuffer,
@@ -283,26 +285,18 @@ class SAC(BaseAlgo):
 
         return next_obs_dict
 
-    def _collect_initial_samples(self, obs_dict):
+    def _collect_initial_samples(self, obs_dict: Dict[str, torch.Tensor], num_samples: int):
         """Collect initial samples to populate replay buffer."""
         sample_count = 0
         with Progress() as progress:
             task = progress.add_task(
-                "Collecting initial samples", total=self.learning_starts)
-            while sample_count < self.learning_starts:
+                "Collecting initial samples", total=num_samples)
+            while sample_count < num_samples:
                 obs_dict = self._collect_experience(obs_dict)
                 sample_count += self.num_envs
                 progress.update(task, advance=self.num_envs)
 
-    def _collect_samples(self, obs_dict, num_samples):
-        """Collect num_samples samples from environment."""
-        sample_count = 0
-        while sample_count < num_samples:
-            obs_dict = self._collect_experience(obs_dict)
-            sample_count += self.num_envs
-        return obs_dict
-
-    def _collect_and_train_online(self, obs_dict, num_samples):
+    def _collect_and_train_online(self, obs_dict: Dict[str, torch.Tensor], num_samples: int):
         """Collect samples and train online (like CleanRL)."""
         sample_count = 0
         loss_dict = {'Critic_Q1': [], 'Critic_Q2': [],
@@ -357,12 +351,14 @@ class SAC(BaseAlgo):
                 else:
                     averaged_loss_dict[key] = 0.0
 
-        # Add training info to loss dict for logging
-        # Each sample = one training step
-        averaged_loss_dict['training_steps'] = num_samples // self.num_envs
-        averaged_loss_dict['buffer_size'] = self.replay_buffer.size()
+        info_dict = {
+            'training_steps': num_samples // self.num_envs,
+            'buffer_size': self.replay_buffer.size(),
+            'collection_time': collection_time,
+            'learn_time': training_time,
+        }
 
-        return obs_dict, averaged_loss_dict, collection_time, training_time
+        return obs_dict, averaged_loss_dict, info_dict
 
     def _update_critics_step(self):
         """Single critic update step."""
