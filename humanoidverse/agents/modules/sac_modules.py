@@ -40,42 +40,26 @@ class SACActor(nn.Module):
                 module_config_dict["output_dim"][idx] = num_actions
         return module_config_dict
 
-    @property
-    def actor(self):
-        return self.actor_module
-
     def forward(self):
         raise NotImplementedError
 
-    @property
-    def action_mean(self):
-        return self.distribution.mean
-
-    @property
-    def action_std(self):
-        return self.distribution.stddev
-
-    @property
-    def entropy(self):
-        return self.distribution.entropy().sum(dim=-1)
-
-    def update_distribution(self, actor_obs):
-        mean = self.actor(actor_obs)
+    def update_distribution(self, actor_obs: torch.Tensor):
+        mean = self.actor_module(actor_obs)
         self.distribution = Normal(mean, mean * 0.0 + self.std)
 
-    def act(self, actor_obs, **kwargs):
+    def act(self, actor_obs: torch.Tensor, **kwargs):
         self.update_distribution(actor_obs)
-        return self.distribution.sample()
+        return self.distribution.rsample()
 
-    def get_actions_log_prob(self, actions):
+    def get_actions_log_prob(self, actions: torch.Tensor):
         return self.distribution.log_prob(actions).sum(dim=-1)
 
-    def act_inference(self, actor_obs):
-        actions_mean = self.actor(actor_obs)
+    def act_inference(self, actor_obs: torch.Tensor):
+        actions_mean = self.actor_module(actor_obs)
         return actions_mean
 
     def to_cpu(self):
-        self.actor = deepcopy(self.actor).to("cpu")
+        self.actor_module = deepcopy(self.actor_module).to("cpu")
         self.std.to("cpu")
 
 

@@ -3,23 +3,32 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import os
+import time
+import statistics
 
 from collections import deque
 from loguru import logger
 from rich.progress import Progress
+from rich.console import Console
+from rich.panel import Panel
+from rich.live import Live
 
 from omegaconf import DictConfig
+from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 
 from humanoidverse.agents.base_algo.base_algo import BaseAlgo
 from humanoidverse.envs.base_task.base_task import BaseTask
 from humanoidverse.agents.modules.sac_modules import SACActor, SACCritic, DoubleQCritic
 from humanoidverse.agents.modules.data_utils import ReplayBuffer
 from humanoidverse.agents.callbacks.base_callback import RL_EvalCallback
+from humanoidverse.utils.average_meters import TensorAverageMeterDict
 
 from hydra.utils import instantiate
 
 from typing import Optional, Dict, List
 from itertools import count
+
+console = Console()
 
 
 def _dict_to_device(data_dict: Dict[str, torch.Tensor], device: torch.device):
@@ -34,6 +43,8 @@ class SAC(BaseAlgo):
         super().__init__(env, config, device)
 
         self.log_dir = log_dir
+        self.writer = TensorboardSummaryWriter(
+            log_dir=self.log_dir, flush_secs=10)
 
         # Environment config
         self.num_envs = self.env.config.num_envs
@@ -73,6 +84,14 @@ class SAC(BaseAlgo):
         self.updates = 0
         self.current_learning_iteration = 0
 
+        # Timing variables
+        self.start_time = 0
+        self.stop_time = 0
+        self.collection_time = 0
+        self.learn_time = 0
+        self.tot_timesteps = 0
+        self.tot_time = 0
+
         # Episode tracking
         self.episode_rewards = deque(maxlen=100)
         self.episode_lengths = deque(maxlen=100)
@@ -80,6 +99,12 @@ class SAC(BaseAlgo):
             self.num_envs, device=self.device)
         self.current_episode_length = torch.zeros(
             self.num_envs, device=self.device)
+        
+        # Episode info tracking
+        self.ep_infos = []
+        self.rewbuffer = deque(maxlen=100)
+        self.lenbuffer = deque(maxlen=100)
+        self.episode_env_tensors = TensorAverageMeterDict()
 
     def setup(self):
         self.actor = SACActor(
@@ -134,15 +159,39 @@ class SAC(BaseAlgo):
             self.current_learning_iteration,
             self.current_learning_iteration + self.num_learning_iterations,
         ):
+            self.start_time = time.time()
+            
             # Collect samples_per_iter samples
             obs_dict = self._collect_samples(obs_dict, self.samples_per_iter)
+            
+            self.stop_time = time.time()
+            self.collection_time = self.stop_time - self.start_time
+            self.start_time = self.stop_time
 
             # Perform multiple training steps
-            self._training_phase()
+            loss_dict = self._training_phase()
+            
+            self.stop_time = time.time()
+            self.learn_time = self.stop_time - self.start_time
+
+            # Logging
+            log_dict = {
+                'it': iteration,
+                'loss_dict': loss_dict,
+                'collection_time': self.collection_time,
+                'learn_time': self.learn_time,
+                'ep_infos': self.ep_infos,
+                'rewbuffer': self.rewbuffer,
+                'lenbuffer': self.lenbuffer,
+                'num_learning_iterations': self.num_learning_iterations
+            }
+            self._post_epoch_logging(log_dict)
 
             if iteration % self.save_interval == 0:
                 self.save(os.path.join(self.log_dir,
                           'model_{}.pt'.format(iteration)))
+            
+            self.ep_infos.clear()
 
         self.current_learning_iteration += self.num_learning_iterations
 
@@ -183,19 +232,32 @@ class SAC(BaseAlgo):
             # Update episode tracking
             self.current_episode_reward += rewards
             self.current_episode_length += 1
+            
+            # Track environment tensors
+            if "to_log" in infos:
+                self.episode_env_tensors.add(infos["to_log"])
 
             # Handle episode termination
             done_envs = dones.nonzero(as_tuple=False).squeeze(1)
             if len(done_envs) > 0:
+                # Track episode info
+                if 'episode' in infos:
+                    self.ep_infos.append(infos['episode'])
+                    
                 for env_idx in done_envs:
-                    self.episode_rewards.append(
-                        self.current_episode_reward[env_idx].item()
-                    )
-                    self.episode_lengths.append(
-                        self.current_episode_length[env_idx].item()
-                    )
+                    episode_reward = self.current_episode_reward[env_idx].item()
+                    episode_length = self.current_episode_length[env_idx].item()
+                    
+                    self.episode_rewards.append(episode_reward)
+                    self.episode_lengths.append(episode_length)
+                    self.rewbuffer.append(episode_reward)
+                    self.lenbuffer.append(episode_length)
+                    
                     self.current_episode_reward[env_idx] = 0
                     self.current_episode_length[env_idx] = 0
+
+            # Update total steps
+            self.total_steps += self.num_envs
 
         return next_obs_dict
 
@@ -240,20 +302,25 @@ class SAC(BaseAlgo):
 
             self.updates += 1
 
-        # Log average losses
+        # Calculate average losses
+        loss_dict = {}
         if critic_losses:
             avg_critic_loss_1 = sum(
                 [c[0] for c in critic_losses]) / len(critic_losses)
             avg_critic_loss_2 = sum(
                 [c[1] for c in critic_losses]) / len(critic_losses)
-            logger.info(
-                f"Avg Critic Loss: Q1={avg_critic_loss_1:.4f}, Q2={avg_critic_loss_2:.4f}")
+            loss_dict['Critic_Q1'] = avg_critic_loss_1
+            loss_dict['Critic_Q2'] = avg_critic_loss_2
+
 
         if actor_losses:
             avg_actor_loss = sum(actor_losses) / len(actor_losses)
             avg_alpha_loss = sum(alpha_losses) / len(alpha_losses)
-            logger.info(
-                f"Avg Actor Loss: {avg_actor_loss:.4f}, Avg Alpha Loss: {avg_alpha_loss:.4f}")
+            loss_dict['Actor'] = avg_actor_loss
+            loss_dict['Alpha'] = avg_alpha_loss
+            loss_dict['Alpha_Value'] = self.alpha.item()
+        
+        return loss_dict
 
     def _update_critics_step(self):
         """Single critic update step."""
@@ -273,64 +340,6 @@ class SAC(BaseAlgo):
         dones = current_samples["dones"]
         next_obs = next_obs_samples
 
-        return self._update_critics(obs, actions, rewards, dones, next_obs)
-
-    def _update_actor_and_alpha_step(self):
-        """Single actor and alpha update step."""
-        # Sample batch from replay buffer
-        current_samples, next_obs_samples = self.replay_buffer.sample(
-            self.batch_size)
-
-        # Move to device
-        current_samples = _dict_to_device(current_samples, self.device)
-
-        # Extract observations
-        obs = {k: v for k, v in current_samples.items()
-               if k in self.algo_obs_dim_dict}
-
-        return self._update_actor_and_alpha(obs)
-
-    def _training_step(self):
-        """Perform one training step."""
-        loss_dict = {}
-
-        # Sample batch from replay buffer
-        current_samples, next_obs_samples = self.replay_buffer.sample(
-            self.batch_size)
-
-        # Move to device
-        current_samples = _dict_to_device(current_samples, self.device)
-        next_obs_samples = _dict_to_device(next_obs_samples, self.device)
-
-        # Extract data
-        obs = {k: v for k, v in current_samples.items()
-               if k in self.algo_obs_dim_dict}
-        actions = current_samples["actions"]
-        rewards = current_samples["rewards"]
-        dones = current_samples["dones"]
-        next_obs = next_obs_samples
-
-        # Update critics
-        critic_loss_1, critic_loss_2 = self._update_critics(
-            obs, actions, rewards, dones, next_obs
-        )
-        loss_dict["critic_1_loss"] = critic_loss_1
-        loss_dict["critic_2_loss"] = critic_loss_2
-
-        # Update actor and alpha
-        if self.updates % self.target_update_frequency == 0:
-            actor_loss, alpha_loss = self._update_actor_and_alpha(obs)
-            loss_dict["actor_loss"] = actor_loss
-            loss_dict["alpha_loss"] = alpha_loss
-
-            # Update target networks
-            self.double_q_critic.soft_update_targets(self.tau)
-
-        self.updates += 1
-        return loss_dict
-
-    def _update_critics(self, obs, actions, rewards, dones, next_obs):
-        """Update critic networks."""
         with torch.no_grad():
             # Sample next actions from current policy
             next_actions = self.actor.act(next_obs["actor_obs"])
@@ -366,8 +375,19 @@ class SAC(BaseAlgo):
 
         return critic_loss_1.item(), critic_loss_2.item()
 
-    def _update_actor_and_alpha(self, obs):
-        """Update actor network and temperature parameter."""
+    def _update_actor_and_alpha_step(self):
+        """Single actor and alpha update step."""
+        # Sample batch from replay buffer
+        current_samples, next_obs_samples = self.replay_buffer.sample(
+            self.batch_size)
+
+        # Move to device
+        current_samples = _dict_to_device(current_samples, self.device)
+
+        # Extract observations
+        obs = {k: v for k, v in current_samples.items()
+               if k in self.algo_obs_dim_dict}
+
         # Sample actions from current policy
         actions = self.actor.act(obs["actor_obs"])
         log_probs = self.actor.get_actions_log_prob(actions)
@@ -511,3 +531,125 @@ class SAC(BaseAlgo):
             actor_state = self.env_step(actor_state)
             actor_state = self._post_eval_env_step(actor_state)
         self._post_evaluate_policy()
+
+    def _post_epoch_logging(self, log_dict, width=80, pad=35):
+        """Comprehensive logging method similar to PPO."""
+        self.tot_timesteps += self.samples_per_iter
+        self.tot_time += log_dict['collection_time'] + log_dict['learn_time']
+        iteration_time = log_dict['collection_time'] + log_dict['learn_time']
+
+        # Episode info logging
+        ep_string = ''
+        if log_dict['ep_infos']:
+            for key in log_dict['ep_infos'][0]:
+                infotensor = torch.tensor([], device=self.device)
+                for ep_info in log_dict['ep_infos']:
+                    # handle scalar and zero dimensional tensor infos
+                    if not isinstance(ep_info[key], torch.Tensor):
+                        ep_info[key] = torch.Tensor([ep_info[key]])
+                    if len(ep_info[key].shape) == 0:
+                        ep_info[key] = ep_info[key].unsqueeze(0)
+                    infotensor = torch.cat(
+                        (infotensor, ep_info[key].to(self.device)))
+                value = torch.mean(infotensor)
+                self.writer.add_scalar('Episode/' + key, value, log_dict['it'])
+                ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
+
+        # Training metrics
+        train_log_dict = {}
+        fps = int(self.samples_per_iter / 
+                  (log_dict['collection_time'] + log_dict['learn_time']))
+        train_log_dict['fps'] = fps
+        train_log_dict['replay_buffer_size'] = self.replay_buffer.size()
+        train_log_dict['alpha_value'] = self.alpha.item()
+
+        # Environment metrics
+        env_log_dict = self.episode_env_tensors.mean_and_clear()
+        env_log_dict = {f"Env/{k}": v for k, v in env_log_dict.items()}
+
+        # Log to TensorBoard
+        self._logging_to_writer(log_dict, train_log_dict, env_log_dict)
+
+        # Create console output
+        str_header = f" \033[1m SAC Learning iteration {log_dict['it']}/{self.current_learning_iteration + log_dict['num_learning_iterations']} \033[0m "
+
+        if len(log_dict['rewbuffer']) > 0:
+            log_string = (f"""{str_header.center(width, ' ')}\n\n"""
+                          f"""{'Computation:':>{pad}} {train_log_dict['fps']:.0f} steps/s (Collection: {log_dict['collection_time']:.3f}s, Learning {log_dict['learn_time']:.3f}s)\n"""
+                          f"""{'Replay buffer size:':>{pad}} {train_log_dict['replay_buffer_size']}\n"""
+                          f"""{'Alpha value:':>{pad}} {train_log_dict['alpha_value']:.4f}\n"""
+                          f"""{'Mean reward:':>{pad}} {statistics.mean(log_dict['rewbuffer']):.2f}\n"""
+                          f"""{'Mean episode length:':>{pad}} {statistics.mean(log_dict['lenbuffer']):.2f}\n""")
+        else:
+            log_string = (f"""{str_header.center(width, ' ')}\n\n"""
+                          f"""{'Computation:':>{pad}} {train_log_dict['fps']:.0f} steps/s (Collection: {log_dict['collection_time']:.3f}s, Learning {log_dict['learn_time']:.3f}s)\n"""
+                          f"""{'Replay buffer size:':>{pad}} {train_log_dict['replay_buffer_size']}\n"""
+                          f"""{'Alpha value:':>{pad}} {train_log_dict['alpha_value']:.4f}\n""")
+
+        # Add environment metrics
+        env_log_string = ""
+        for k, v in env_log_dict.items():
+            entry = f"{f'{k}:':>{pad}} {v:.4f}"
+            env_log_string += f"{entry}\n"
+        log_string += env_log_string
+        log_string += ep_string
+
+        # Add loss information
+        if log_dict['loss_dict']:
+            loss_string = ""
+            for loss_name, loss_value in log_dict['loss_dict'].items():
+                loss_string += f"""{f'{loss_name} Loss:':>{pad}} {loss_value:.4f}\n"""
+            log_string += loss_string
+
+        log_string += (f"""{'-' * width}\n"""
+                       f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
+                       f"""{'Total updates:':>{pad}} {self.updates}\n"""
+                       f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
+                       f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
+                       f"""{'ETA:':>{pad}} {self.tot_time / (log_dict['it'] + 1) * (log_dict['num_learning_iterations'] - log_dict['it']):.1f}s\n""")
+        log_string += f"Logging Directory: {self.log_dir}"
+
+        # Use rich Live to update console
+        with Live(Panel(log_string, title="SAC Training Log"), refresh_per_second=4, console=console):
+            pass
+
+    def _logging_to_writer(self, log_dict, train_log_dict, env_log_dict):
+        """Log metrics to TensorBoard."""
+        # Loss logging
+        for loss_key, loss_value in log_dict['loss_dict'].items():
+            self.writer.add_scalar(f'Loss/{loss_key}', loss_value, log_dict['it'])
+        
+        # Learning rates
+        self.writer.add_scalar('Loss/actor_learning_rate', self.actor_learning_rate, log_dict['it'])
+        self.writer.add_scalar('Loss/critic_learning_rate', self.critic_learning_rate, log_dict['it'])
+        self.writer.add_scalar('Loss/alpha_learning_rate', self.alpha_learning_rate, log_dict['it'])
+        
+        # SAC specific metrics
+        self.writer.add_scalar('Policy/alpha_value', train_log_dict['alpha_value'], log_dict['it'])
+        self.writer.add_scalar('Policy/replay_buffer_size', train_log_dict['replay_buffer_size'], log_dict['it'])
+        
+        # Performance metrics
+        self.writer.add_scalar('Perf/total_fps', train_log_dict['fps'], log_dict['it'])
+        self.writer.add_scalar('Perf/collection_time', log_dict['collection_time'], log_dict['it'])
+        self.writer.add_scalar('Perf/learning_time', log_dict['learn_time'], log_dict['it'])
+        self.writer.add_scalar('Perf/total_updates', self.updates, log_dict['it'])
+        
+        # Episode metrics
+        if len(log_dict['rewbuffer']) > 0:
+            self.writer.add_scalar('Train/mean_reward', statistics.mean(log_dict['rewbuffer']), log_dict['it'])
+            self.writer.add_scalar('Train/mean_episode_length', statistics.mean(log_dict['lenbuffer']), log_dict['it'])
+            self.writer.add_scalar('Train/mean_reward/time', statistics.mean(log_dict['rewbuffer']), self.tot_time)
+            self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(log_dict['lenbuffer']), self.tot_time)
+        
+        # Environment metrics
+        if len(env_log_dict) > 0:
+            for k, v in env_log_dict.items():
+                self.writer.add_scalar(k, v, log_dict['it'])
+    
+    def env_step(self, actor_state):
+        """Environment step for evaluation."""
+        obs_dict, rewards, dones, extras = self.env.step(actor_state)
+        actor_state.update(
+            {"obs": obs_dict, "rewards": rewards, "dones": dones, "extras": extras}
+        )
+        return actor_state
