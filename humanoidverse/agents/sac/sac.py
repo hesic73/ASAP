@@ -57,7 +57,6 @@ class SAC(BaseAlgo):
         self.replay_buffer_size = self.config.replay_buffer_size
         self.batch_size = self.config.batch_size
         self.learning_starts = self.config.learning_starts
-        self.learning_frequency = self.config.learning_frequency
         self.target_update_frequency = self.config.target_update_frequency
         self.tau = self.config.tau
         self.gamma = self.config.gamma
@@ -65,6 +64,9 @@ class SAC(BaseAlgo):
         # Training parameters
         self.samples_per_iter = self.config.samples_per_iter
         self.policy_frequency = self.config.policy_frequency
+        self.gradient_steps = self.config.gradient_steps
+
+        self.replay_buffer_on_device = self.config.replay_buffer_on_device
 
         # Learning rates
         self.actor_learning_rate = self.config.actor_learning_rate
@@ -117,11 +119,27 @@ class SAC(BaseAlgo):
             return SACCritic(self.algo_obs_dim_dict, self.config.module_dict.critic, self.num_actions)
 
         # Entropy temperature setup
-        self.autotune_alpha = getattr(self.config, 'autotune_alpha', False)
+        self.autotune_alpha = self.config.autotune_alpha
 
         if self.autotune_alpha:
-            self.target_entropy = getattr(
-                self.config, 'target_entropy', -self.num_actions)
+            raw_target_entropy = self.config.target_entropy
+            if isinstance(raw_target_entropy, str):
+                if raw_target_entropy.lower() == 'auto':
+                    self.target_entropy = -float(self.num_actions)
+                else:
+                    try:
+                        self.target_entropy = float(raw_target_entropy)
+                    except Exception as exc:
+                        raise ValueError(
+                            f"Invalid target_entropy string: {raw_target_entropy}"
+                        ) from exc
+            elif isinstance(raw_target_entropy, (int, float)):
+                self.target_entropy = float(raw_target_entropy)
+            else:
+                raise TypeError(
+                    f"target_entropy must be 'auto' or a number, got {type(raw_target_entropy)}"
+                )
+
             self.log_alpha = torch.zeros(
                 1, requires_grad=True, device=self.device)
             logger.info(
@@ -148,10 +166,11 @@ class SAC(BaseAlgo):
             self.alpha_optimizer = optim.Adam(
                 [self.log_alpha], lr=self.alpha_learning_rate)
 
+        rb_device = self.device if self.replay_buffer_on_device else torch.device("cpu")
         self.replay_buffer = ReplayBuffer(
             buffer_size=int(self.replay_buffer_size),
             num_envs=self.num_envs,
-            device="cpu",
+            device=rb_device,
         )
         for obs_key, obs_shape in self.algo_obs_dim_dict.items():
             self.replay_buffer.register_key(obs_key, obs_shape, is_obs=True)
@@ -244,10 +263,10 @@ class SAC(BaseAlgo):
             # Store transition in replay buffer
             transition_data = {}
             for obs_key in obs_dict.keys():
-                transition_data[obs_key] = obs_dict[obs_key].cpu()
-            transition_data["actions"] = actions.cpu()
-            transition_data["rewards"] = rewards.cpu().unsqueeze(1)
-            transition_data["dones"] = dones.cpu().unsqueeze(1)
+                transition_data[obs_key] = obs_dict[obs_key].to(self.replay_buffer.device)
+            transition_data["actions"] = actions.to(self.replay_buffer.device)
+            transition_data["rewards"] = rewards.to(self.replay_buffer.device).unsqueeze(1)
+            transition_data["dones"] = dones.to(self.replay_buffer.device).unsqueeze(1)
 
             self.replay_buffer.add(transition_data)
 
@@ -315,27 +334,30 @@ class SAC(BaseAlgo):
             # Train (we already collected initial samples in setup)
             train_start = time.time()
 
-            # Update critics every step
-            critic_loss_1, critic_loss_2 = self._update_critics_step()
-            loss_dict['Critic_Q1'].append(critic_loss_1)
-            loss_dict['Critic_Q2'].append(critic_loss_2)
+            # Perform gradient_steps updates per env step
+            for _ in range(self.gradient_steps):
+                # Update critics every update
+                critic_loss_1, critic_loss_2 = self._update_critics_step()
+                loss_dict['Critic_Q1'].append(critic_loss_1)
+                loss_dict['Critic_Q2'].append(critic_loss_2)
 
-            # Update actor and alpha with policy frequency (delayed updates)
-            if self.updates % self.policy_frequency == 0:
-                # Compensate for delay by doing policy_frequency updates
-                for _ in range(self.policy_frequency):
-                    actor_loss, alpha_loss = self._update_actor_and_alpha_step()
-                    loss_dict['Actor'].append(actor_loss)
-                    loss_dict['Alpha'].append(alpha_loss)
-                    alpha_val = self.alpha.item() if isinstance(
-                        self.alpha, torch.Tensor) else self.alpha
-                    loss_dict['Alpha_Value'].append(alpha_val)
+                # Update actor and alpha with policy frequency (delayed updates)
+                if self.updates % self.policy_frequency == 0:
+                    # Compensate for delay by doing policy_frequency updates
+                    for _ in range(self.policy_frequency):
+                        actor_loss, alpha_loss = self._update_actor_and_alpha_step()
+                        loss_dict['Actor'].append(actor_loss)
+                        loss_dict['Alpha'].append(alpha_loss)
+                        alpha_val = self.alpha.item() if isinstance(
+                            self.alpha, torch.Tensor) else self.alpha
+                        loss_dict['Alpha_Value'].append(alpha_val)
 
-            # Update target networks
-            if self.updates % self.target_update_frequency == 0:
-                self.double_q_critic.soft_update_targets()
+                # Update target networks
+                if self.updates % self.target_update_frequency == 0:
+                    self.double_q_critic.soft_update_targets()
 
-            self.updates += 1
+                self.updates += 1
+
             training_time += time.time() - train_start
 
         # Average the losses
@@ -352,7 +374,7 @@ class SAC(BaseAlgo):
                     averaged_loss_dict[key] = 0.0
 
         info_dict = {
-            'training_steps': num_samples // self.num_envs,
+            'training_steps': (num_samples // self.num_envs) * max(1, self.gradient_steps),
             'buffer_size': self.replay_buffer.size(),
             'collection_time': collection_time,
             'learn_time': training_time,
@@ -500,15 +522,13 @@ class SAC(BaseAlgo):
             loaded_dict["critic_optimizer_state_dict"]
         )
 
-        # Load alpha settings
-        # Default to True for backward compatibility
-        if loaded_dict.get("autotune_alpha", True):
-            if hasattr(self, 'alpha_optimizer'):
-                self.alpha_optimizer.load_state_dict(
-                    loaded_dict["alpha_optimizer_state_dict"])
-            self.log_alpha = loaded_dict["log_alpha"]
+        # Load alpha settings (explicit, no fallbacks)
+        if loaded_dict["autotune_alpha"]:
+            with torch.no_grad():
+                self.log_alpha.data.copy_(loaded_dict["log_alpha"].to(self.device))
+            self.alpha_optimizer.load_state_dict(loaded_dict["alpha_optimizer_state_dict"])
         else:
-            self.alpha_value = loaded_dict["alpha_value"]
+            self.alpha_value = torch.as_tensor(loaded_dict["alpha_value"], device=self.device)
 
         self.current_learning_iteration = loaded_dict["iter"]
         self.total_steps = loaded_dict["total_steps"]
