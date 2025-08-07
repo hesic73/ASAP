@@ -5,9 +5,9 @@ algo:
   _recursive_: False
   config:
     # SAC specific parameters
-    replay_buffer_size: 1e5
+    replay_buffer_size: 1e6
     batch_size: 256
-    learning_starts: 25000
+    learning_starts: 5000
     learning_frequency: 1
     target_update_frequency: 1
     tau: 0.01
@@ -18,19 +18,19 @@ algo:
     critic_learning_rate: 0.0003
     alpha_learning_rate: 0.0003
     
-    # Entropy temperature target
-    target_entropy: -1.0
+    # Entropy regularization
+    autotune_alpha: false  # Set to true for automatic alpha tuning
+    alpha: 0.2  # Fixed alpha value (used when autotune_alpha is false)
+    target_entropy: "auto"  # Target entropy for autotuning (auto = -action_dim)
     
-    # Training parameters - NEW for off-policy modification
+    # Training parameters
     samples_per_iter: 512
-    actor_steps: 256
-    critic_steps: 256
+    policy_frequency: 2  # How often to update policy (delayed updates like TD3)
 
-    save_interval: 100
+    save_interval: 1000
     
     # General training config
     num_learning_iterations: 100000
-    init_noise_std: 0.2
     
     eval_callbacks: null
 

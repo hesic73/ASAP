@@ -62,19 +62,14 @@ class SAC(BaseAlgo):
         self.tau = self.config.tau
         self.gamma = self.config.gamma
 
-        # Off-policy training parameters
+        # Training parameters
         self.samples_per_iter = self.config.samples_per_iter
-        self.actor_steps = self.config.actor_steps
-        self.critic_steps = self.config.critic_steps
+        self.policy_frequency = self.config.policy_frequency
 
         # Learning rates
         self.actor_learning_rate = self.config.actor_learning_rate
         self.critic_learning_rate = self.config.critic_learning_rate
         self.alpha_learning_rate = self.config.alpha_learning_rate
-
-        # Entropy temperature
-        self.target_entropy = self.config.target_entropy
-        self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
 
         # Training config
         self.num_learning_iterations = self.config.num_learning_iterations
@@ -99,7 +94,7 @@ class SAC(BaseAlgo):
             self.num_envs, device=self.device)
         self.current_episode_length = torch.zeros(
             self.num_envs, device=self.device)
-        
+
         # Episode info tracking
         self.ep_infos = []
         self.rewbuffer = deque(maxlen=100)
@@ -107,19 +102,39 @@ class SAC(BaseAlgo):
         self.episode_env_tensors = TensorAverageMeterDict()
 
     def setup(self):
+        # Get action space bounds if available
+        action_scale, action_bias = self._get_action_scaling()
+
         self.actor = SACActor(
             obs_dim_dict=self.algo_obs_dim_dict,
             module_config_dict=self.config.module_dict.actor,
             num_actions=self.num_actions,
-            init_noise_std=self.config.init_noise_std,
+            action_scale=action_scale,
+            action_bias=action_bias,
         ).to(self.device)
 
         def critic_factory():
             return SACCritic(self.algo_obs_dim_dict, self.config.module_dict.critic, self.num_actions)
 
+        # Entropy temperature setup
+        self.autotune_alpha = getattr(self.config, 'autotune_alpha', False)
+
+        if self.autotune_alpha:
+            self.target_entropy = getattr(
+                self.config, 'target_entropy', -self.num_actions)
+            self.log_alpha = torch.zeros(
+                1, requires_grad=True, device=self.device)
+            logger.info(
+                f"Using automatic alpha tuning with target entropy: {self.target_entropy}")
+        else:
+            self.alpha_value = torch.tensor(
+                self.config.alpha, device=self.device)
+            logger.info(f"Using fixed alpha value: {self.alpha_value}")
+
         self.double_q_critic = DoubleQCritic(
             critic_factory=critic_factory,
             device=self.device,
+            tau=self.tau,
         )
 
         self.actor_optimizer = optim.Adam(
@@ -128,8 +143,10 @@ class SAC(BaseAlgo):
         self.critic_optimizer = optim.Adam(
             self.double_q_critic.parameters(), lr=self.critic_learning_rate
         )
-        self.alpha_optimizer = optim.Adam(
-            [self.log_alpha], lr=self.alpha_learning_rate)
+
+        if self.autotune_alpha:
+            self.alpha_optimizer = optim.Adam(
+                [self.log_alpha], lr=self.alpha_learning_rate)
 
         self.replay_buffer = ReplayBuffer(
             buffer_size=int(self.replay_buffer_size),
@@ -144,6 +161,18 @@ class SAC(BaseAlgo):
         self.replay_buffer.register_key("dones", (1,), dtype=torch.bool)
 
         logger.info(f"Replay buffer:\n{self.replay_buffer}")
+
+    def _get_action_scaling(self):
+        qpos_limits, _, _ = self.env.simulator.get_dof_limits_properties()
+        qpos_limits = qpos_limits.cpu()  # (num_dof, 2)
+
+        # NOTE (hsc): 这里environment自带一个scale。所以需要除以这个scale
+        _action_scale = self.env.action_scale
+        qpos_limits /= _action_scale
+
+        action_scale = (qpos_limits[:, 1] - qpos_limits[:, 0]) / 2.0
+        action_bias = (qpos_limits[:, 1] + qpos_limits[:, 0]) / 2.0
+        return action_scale, action_bias
 
     def learn(self):
         obs_dict = self.env.reset_all()
@@ -160,26 +189,17 @@ class SAC(BaseAlgo):
             self.current_learning_iteration + self.num_learning_iterations,
         ):
             self.start_time = time.time()
-            
-            # Collect samples_per_iter samples
-            obs_dict = self._collect_samples(obs_dict, self.samples_per_iter)
-            
-            self.stop_time = time.time()
-            self.collection_time = self.stop_time - self.start_time
-            self.start_time = self.stop_time
 
-            # Perform multiple training steps
-            loss_dict = self._training_phase()
-            
-            self.stop_time = time.time()
-            self.learn_time = self.stop_time - self.start_time
+            # Collect samples_per_iter samples with online training
+            obs_dict, loss_dict, collection_time, learn_time = self._collect_and_train_online(
+                obs_dict, self.samples_per_iter)
 
             # Logging
             log_dict = {
                 'it': iteration,
                 'loss_dict': loss_dict,
-                'collection_time': self.collection_time,
-                'learn_time': self.learn_time,
+                'collection_time': collection_time,
+                'learn_time': learn_time,
                 'ep_infos': self.ep_infos,
                 'rewbuffer': self.rewbuffer,
                 'lenbuffer': self.lenbuffer,
@@ -190,7 +210,7 @@ class SAC(BaseAlgo):
             if iteration % self.save_interval == 0:
                 self.save(os.path.join(self.log_dir,
                           'model_{}.pt'.format(iteration)))
-            
+
             self.ep_infos.clear()
 
         self.current_learning_iteration += self.num_learning_iterations
@@ -232,7 +252,7 @@ class SAC(BaseAlgo):
             # Update episode tracking
             self.current_episode_reward += rewards
             self.current_episode_length += 1
-            
+
             # Track environment tensors
             if "to_log" in infos:
                 self.episode_env_tensors.add(infos["to_log"])
@@ -243,16 +263,18 @@ class SAC(BaseAlgo):
                 # Track episode info
                 if 'episode' in infos:
                     self.ep_infos.append(infos['episode'])
-                    
+
                 for env_idx in done_envs:
-                    episode_reward = self.current_episode_reward[env_idx].item()
-                    episode_length = self.current_episode_length[env_idx].item()
-                    
+                    episode_reward = self.current_episode_reward[env_idx].item(
+                    )
+                    episode_length = self.current_episode_length[env_idx].item(
+                    )
+
                     self.episode_rewards.append(episode_reward)
                     self.episode_lengths.append(episode_length)
                     self.rewbuffer.append(episode_reward)
                     self.lenbuffer.append(episode_length)
-                    
+
                     self.current_episode_reward[env_idx] = 0
                     self.current_episode_length[env_idx] = 0
 
@@ -280,47 +302,67 @@ class SAC(BaseAlgo):
             sample_count += self.num_envs
         return obs_dict
 
-    def _training_phase(self):
-        """Perform multiple training steps for both critic and actor."""
-        # Update critics for critic_steps
-        critic_losses = []
-        for _ in range(self.critic_steps):
-            critic_loss_1, critic_loss_2 = self._update_critics_step()
-            critic_losses.append((critic_loss_1, critic_loss_2))
+    def _collect_and_train_online(self, obs_dict, num_samples):
+        """Collect samples and train online (like CleanRL)."""
+        sample_count = 0
+        loss_dict = {'Critic_Q1': [], 'Critic_Q2': [],
+                     'Actor': [], 'Alpha': [], 'Alpha_Value': []}
 
-        # Update actor and alpha for actor_steps
-        actor_losses = []
-        alpha_losses = []
-        for _ in range(self.actor_steps):
-            actor_loss, alpha_loss = self._update_actor_and_alpha_step()
-            actor_losses.append(actor_loss)
-            alpha_losses.append(alpha_loss)
+        collection_time = 0.0
+        training_time = 0.0
+
+        while sample_count < num_samples:
+            # Collect one step of experience
+            collect_start = time.time()
+            obs_dict = self._collect_experience(obs_dict)
+            collection_time += time.time() - collect_start
+            sample_count += self.num_envs
+
+            # Train (we already collected initial samples in setup)
+            train_start = time.time()
+
+            # Update critics every step
+            critic_loss_1, critic_loss_2 = self._update_critics_step()
+            loss_dict['Critic_Q1'].append(critic_loss_1)
+            loss_dict['Critic_Q2'].append(critic_loss_2)
+
+            # Update actor and alpha with policy frequency (delayed updates)
+            if self.updates % self.policy_frequency == 0:
+                # Compensate for delay by doing policy_frequency updates
+                for _ in range(self.policy_frequency):
+                    actor_loss, alpha_loss = self._update_actor_and_alpha_step()
+                    loss_dict['Actor'].append(actor_loss)
+                    loss_dict['Alpha'].append(alpha_loss)
+                    alpha_val = self.alpha.item() if isinstance(
+                        self.alpha, torch.Tensor) else self.alpha
+                    loss_dict['Alpha_Value'].append(alpha_val)
 
             # Update target networks
             if self.updates % self.target_update_frequency == 0:
-                self.double_q_critic.soft_update_targets(self.tau)
+                self.double_q_critic.soft_update_targets()
 
             self.updates += 1
+            training_time += time.time() - train_start
 
-        # Calculate average losses
-        loss_dict = {}
-        if critic_losses:
-            avg_critic_loss_1 = sum(
-                [c[0] for c in critic_losses]) / len(critic_losses)
-            avg_critic_loss_2 = sum(
-                [c[1] for c in critic_losses]) / len(critic_losses)
-            loss_dict['Critic_Q1'] = avg_critic_loss_1
-            loss_dict['Critic_Q2'] = avg_critic_loss_2
+        # Average the losses
+        averaged_loss_dict = {}
+        for key, values in loss_dict.items():
+            if values:
+                averaged_loss_dict[key] = sum(values) / len(values)
+            else:
+                if key == 'Alpha_Value':
+                    alpha_val = self.alpha.item() if isinstance(
+                        self.alpha, torch.Tensor) else self.alpha
+                    averaged_loss_dict[key] = alpha_val
+                else:
+                    averaged_loss_dict[key] = 0.0
 
+        # Add training info to loss dict for logging
+        # Each sample = one training step
+        averaged_loss_dict['training_steps'] = num_samples // self.num_envs
+        averaged_loss_dict['buffer_size'] = self.replay_buffer.size()
 
-        if actor_losses:
-            avg_actor_loss = sum(actor_losses) / len(actor_losses)
-            avg_alpha_loss = sum(alpha_losses) / len(alpha_losses)
-            loss_dict['Actor'] = avg_actor_loss
-            loss_dict['Alpha'] = avg_alpha_loss
-            loss_dict['Alpha_Value'] = self.alpha.item()
-        
-        return loss_dict
+        return obs_dict, averaged_loss_dict, collection_time, training_time
 
     def _update_critics_step(self):
         """Single critic update step."""
@@ -404,39 +446,49 @@ class SAC(BaseAlgo):
         actor_loss.backward()
         self.actor_optimizer.step()
 
-        # Update alpha (temperature parameter)
-        alpha_loss = -(
-            self.log_alpha * (log_probs + self.target_entropy).detach()
-        ).mean()
+        # Update alpha (temperature parameter) if autotuning
+        if self.autotune_alpha:
+            alpha_loss = -(
+                self.log_alpha * (log_probs + self.target_entropy).detach()
+            ).mean()
 
-        self.alpha_optimizer.zero_grad()
-        alpha_loss.backward()
-        self.alpha_optimizer.step()
+            self.alpha_optimizer.zero_grad()
+            alpha_loss.backward()
+            self.alpha_optimizer.step()
 
-        return actor_loss.item(), alpha_loss.item()
+            return actor_loss.item(), alpha_loss.item()
+        else:
+            return actor_loss.item(), 0.0  # No alpha loss when using fixed alpha
 
     @property
     def alpha(self):
         """Current value of temperature parameter."""
-        return self.log_alpha.exp()
+        if self.autotune_alpha:
+            return self.log_alpha.exp()
+        else:
+            return self.alpha_value
 
     def save(self, path: str):
         """Save model checkpoint."""
         logger.info(f"Saving checkpoint to {path}")
-        torch.save(
-            {
-                "actor_model_state_dict": self.actor.state_dict(),
-                "double_q_critic_state_dict": self.double_q_critic.state_dict(),
-                "actor_optimizer_state_dict": self.actor_optimizer.state_dict(),
-                "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
-                "alpha_optimizer_state_dict": self.alpha_optimizer.state_dict(),
-                "log_alpha": self.log_alpha,
-                "iter": self.current_learning_iteration,
-                "total_steps": self.total_steps,
-                "updates": self.updates,
-            },
-            path,
-        )
+        save_dict = {
+            "actor_model_state_dict": self.actor.state_dict(),
+            "double_q_critic_state_dict": self.double_q_critic.state_dict(),
+            "actor_optimizer_state_dict": self.actor_optimizer.state_dict(),
+            "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
+            "iter": self.current_learning_iteration,
+            "total_steps": self.total_steps,
+            "updates": self.updates,
+            "autotune_alpha": self.autotune_alpha,
+        }
+
+        if self.autotune_alpha:
+            save_dict["alpha_optimizer_state_dict"] = self.alpha_optimizer.state_dict()
+            save_dict["log_alpha"] = self.log_alpha
+        else:
+            save_dict["alpha_value"] = self.alpha_value
+
+        torch.save(save_dict, path)
 
     def load(self, ckpt_path: str):
         logger.info(f"Loading checkpoint from {ckpt_path}")
@@ -451,10 +503,17 @@ class SAC(BaseAlgo):
         self.critic_optimizer.load_state_dict(
             loaded_dict["critic_optimizer_state_dict"]
         )
-        self.alpha_optimizer.load_state_dict(
-            loaded_dict["alpha_optimizer_state_dict"])
 
-        self.log_alpha = loaded_dict["log_alpha"]
+        # Load alpha settings
+        # Default to True for backward compatibility
+        if loaded_dict.get("autotune_alpha", True):
+            if hasattr(self, 'alpha_optimizer'):
+                self.alpha_optimizer.load_state_dict(
+                    loaded_dict["alpha_optimizer_state_dict"])
+            self.log_alpha = loaded_dict["log_alpha"]
+        else:
+            self.alpha_value = loaded_dict["alpha_value"]
+
         self.current_learning_iteration = loaded_dict["iter"]
         self.total_steps = loaded_dict["total_steps"]
         self.updates = loaded_dict["updates"]
@@ -557,7 +616,7 @@ class SAC(BaseAlgo):
 
         # Training metrics
         train_log_dict = {}
-        fps = int(self.samples_per_iter / 
+        fps = int(self.samples_per_iter /
                   (log_dict['collection_time'] + log_dict['learn_time']))
         train_log_dict['fps'] = fps
         train_log_dict['replay_buffer_size'] = self.replay_buffer.size()
@@ -617,35 +676,62 @@ class SAC(BaseAlgo):
         """Log metrics to TensorBoard."""
         # Loss logging
         for loss_key, loss_value in log_dict['loss_dict'].items():
-            self.writer.add_scalar(f'Loss/{loss_key}', loss_value, log_dict['it'])
-        
+            self.writer.add_scalar(
+                f'Loss/{loss_key}', loss_value, log_dict['it'])
+
         # Learning rates
-        self.writer.add_scalar('Loss/actor_learning_rate', self.actor_learning_rate, log_dict['it'])
-        self.writer.add_scalar('Loss/critic_learning_rate', self.critic_learning_rate, log_dict['it'])
-        self.writer.add_scalar('Loss/alpha_learning_rate', self.alpha_learning_rate, log_dict['it'])
-        
+        self.writer.add_scalar('Loss/actor_learning_rate',
+                               self.actor_learning_rate, log_dict['it'])
+        self.writer.add_scalar('Loss/critic_learning_rate',
+                               self.critic_learning_rate, log_dict['it'])
+        self.writer.add_scalar('Loss/alpha_learning_rate',
+                               self.alpha_learning_rate, log_dict['it'])
+
         # SAC specific metrics
-        self.writer.add_scalar('Policy/alpha_value', train_log_dict['alpha_value'], log_dict['it'])
-        self.writer.add_scalar('Policy/replay_buffer_size', train_log_dict['replay_buffer_size'], log_dict['it'])
-        
+        self.writer.add_scalar('Policy/alpha_value',
+                               train_log_dict['alpha_value'], log_dict['it'])
+        self.writer.add_scalar('Policy/replay_buffer_size',
+                               train_log_dict['replay_buffer_size'], log_dict['it'])
+
+        # Additional alpha logging
+        if self.autotune_alpha:
+            self.writer.add_scalar(
+                'Policy/log_alpha', self.log_alpha.item(), log_dict['it'])
+            self.writer.add_scalar(
+                'Policy/target_entropy', self.target_entropy, log_dict['it'])
+            if 'Alpha' in log_dict['loss_dict']:
+                self.writer.add_scalar(
+                    'Policy/alpha_loss', log_dict['loss_dict']['Alpha'], log_dict['it'])
+        else:
+            self.writer.add_scalar('Policy/alpha_fixed',
+                                   self.alpha_value, log_dict['it'])
+
         # Performance metrics
-        self.writer.add_scalar('Perf/total_fps', train_log_dict['fps'], log_dict['it'])
-        self.writer.add_scalar('Perf/collection_time', log_dict['collection_time'], log_dict['it'])
-        self.writer.add_scalar('Perf/learning_time', log_dict['learn_time'], log_dict['it'])
-        self.writer.add_scalar('Perf/total_updates', self.updates, log_dict['it'])
-        
+        self.writer.add_scalar(
+            'Perf/total_fps', train_log_dict['fps'], log_dict['it'])
+        self.writer.add_scalar('Perf/collection_time',
+                               log_dict['collection_time'], log_dict['it'])
+        self.writer.add_scalar('Perf/learning_time',
+                               log_dict['learn_time'], log_dict['it'])
+        self.writer.add_scalar('Perf/total_updates',
+                               self.updates, log_dict['it'])
+
         # Episode metrics
         if len(log_dict['rewbuffer']) > 0:
-            self.writer.add_scalar('Train/mean_reward', statistics.mean(log_dict['rewbuffer']), log_dict['it'])
-            self.writer.add_scalar('Train/mean_episode_length', statistics.mean(log_dict['lenbuffer']), log_dict['it'])
-            self.writer.add_scalar('Train/mean_reward/time', statistics.mean(log_dict['rewbuffer']), self.tot_time)
-            self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(log_dict['lenbuffer']), self.tot_time)
-        
+            self.writer.add_scalar(
+                'Train/mean_reward', statistics.mean(log_dict['rewbuffer']), log_dict['it'])
+            self.writer.add_scalar(
+                'Train/mean_episode_length', statistics.mean(log_dict['lenbuffer']), log_dict['it'])
+            self.writer.add_scalar(
+                'Train/mean_reward/time', statistics.mean(log_dict['rewbuffer']), self.tot_time)
+            self.writer.add_scalar('Train/mean_episode_length/time',
+                                   statistics.mean(log_dict['lenbuffer']), self.tot_time)
+
         # Environment metrics
         if len(env_log_dict) > 0:
             for k, v in env_log_dict.items():
                 self.writer.add_scalar(k, v, log_dict['it'])
-    
+
     def env_step(self, actor_state):
         """Environment step for evaluation."""
         obs_dict, rewards, dones, extras = self.env.step(actor_state)

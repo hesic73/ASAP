@@ -16,51 +16,93 @@ class SACActor(nn.Module):
         obs_dim_dict: Dict[str, int],
         module_config_dict: Dict[str, Any],
         num_actions: int,
-        init_noise_std: float,
+        action_scale: torch.Tensor = None,
+        action_bias: torch.Tensor = None,
     ):
         super().__init__()
 
+        # Modify config to output 2 * num_actions (mean and log_std)
         module_config_dict = self._process_module_config(
-            module_config_dict, num_actions
+            module_config_dict, num_actions * 2
         )
 
         self.actor_module = BaseModule(obs_dim_dict, module_config_dict)
+        self.num_actions = num_actions
 
-        # Action noise
-        self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
+        # Log std bounds for stability (from CleanRL)
+        self.LOG_STD_MAX = 2
+        self.LOG_STD_MIN = -5
+
+        # Action scaling for bounded action spaces
+        if action_scale is not None:
+            self.register_buffer("action_scale", action_scale)
+            self.register_buffer("action_bias", action_bias)
+        else:
+            # Default to [-1, 1] if not provided
+            self.register_buffer("action_scale", torch.ones(num_actions))
+            self.register_buffer("action_bias", torch.zeros(num_actions))
+
         self.distribution = None
         # disable args validation for speedup
         Normal.set_default_validate_args = False
 
     def _process_module_config(
-        self, module_config_dict: Dict[str, Any], num_actions: int
+        self, module_config_dict: Dict[str, Any], output_dim: int
     ) -> Dict[str, Any]:
-        for idx, output_dim in enumerate(module_config_dict["output_dim"]):
-            if output_dim == "robot_action_dim":
-                module_config_dict["output_dim"][idx] = num_actions
+        for idx, dim in enumerate(module_config_dict["output_dim"]):
+            if dim == "robot_action_dim":
+                module_config_dict["output_dim"][idx] = output_dim
         return module_config_dict
 
-    def forward(self):
-        raise NotImplementedError
-
     def update_distribution(self, actor_obs: torch.Tensor):
-        mean = self.actor_module(actor_obs)
-        self.distribution = Normal(mean, mean * 0.0 + self.std)
+        """Update internal distribution based on current observations."""
+        output = self.actor_module(actor_obs)
+        mean, log_std = output.chunk(2, dim=-1)
+
+        # Clamp log_std for stability
+        log_std = torch.tanh(log_std)
+        log_std = self.LOG_STD_MIN + 0.5 * \
+            (self.LOG_STD_MAX - self.LOG_STD_MIN) * (log_std + 1)
+        std = log_std.exp()
+
+        self.distribution = Normal(mean, std)
 
     def act(self, actor_obs: torch.Tensor, **kwargs):
+        """Stochastic action sampling with tanh transformation."""
         self.update_distribution(actor_obs)
-        return self.distribution.rsample()
+        # Reparameterization trick
+        x_t = self.distribution.rsample()
+        # Tanh transformation
+        y_t = torch.tanh(x_t)
+        # Scale to action space
+        action = y_t * self.action_scale + self.action_bias
+        return action
 
     def get_actions_log_prob(self, actions: torch.Tensor):
-        return self.distribution.log_prob(actions).sum(dim=-1)
+        """Get log probability of given actions."""
+        # Convert actions back to pre-tanh space for log_prob calculation
+        y_t = (actions - self.action_bias) / self.action_scale
+        # Clamp to avoid numerical issues with atanh
+        y_t = torch.clamp(y_t, -0.999, 0.999)
+        x_t = torch.atanh(y_t)
+
+        # Get log prob in pre-tanh space
+        log_prob = self.distribution.log_prob(x_t)
+        # Apply tanh correction
+        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
+        return log_prob.sum(dim=-1)
 
     def act_inference(self, actor_obs: torch.Tensor):
-        actions_mean = self.actor_module(actor_obs)
-        return actions_mean
+        """Deterministic action for inference."""
+        output = self.actor_module(actor_obs)
+        mean, _ = output.chunk(2, dim=-1)
+        # Use mean action with tanh and scaling
+        y_t = torch.tanh(mean)
+        action = y_t * self.action_scale + self.action_bias
+        return action
 
     def to_cpu(self):
         self.actor_module = deepcopy(self.actor_module).to("cpu")
-        self.std.to("cpu")
 
 
 class SACCritic(nn.Module):
@@ -89,8 +131,10 @@ class SACCritic(nn.Module):
 class DoubleQCritic(torch.nn.Module):
     """Double Q-network for SAC algorithm."""
 
-    def __init__(self, critic_factory: Callable[[], nn.Module], device: torch.device):
+    def __init__(self, critic_factory: Callable[[], nn.Module], device: torch.device, tau: float = 0.005):
         super().__init__()
+
+        self.tau = tau
 
         # Create critics using the factory function
         self.critic_1 = critic_factory().to(device)
@@ -119,16 +163,16 @@ class DoubleQCritic(torch.nn.Module):
             target_q2 = self.target_critic_2.evaluate(obs, actions)
         return target_q1, target_q2
 
-    def soft_update_targets(self, tau: float):
+    def soft_update_targets(self):
         """Soft update of target networks."""
         for target_param, param in zip(
             self.target_critic_1.parameters(), self.critic_1.parameters()
         ):
             target_param.data.copy_(
-                tau * param.data + (1 - tau) * target_param.data)
+                self.tau * param.data + (1 - self.tau) * target_param.data)
 
         for target_param, param in zip(
             self.target_critic_2.parameters(), self.critic_2.parameters()
         ):
             target_param.data.copy_(
-                tau * param.data + (1 - tau) * target_param.data)
+                self.tau * param.data + (1 - self.tau) * target_param.data)
