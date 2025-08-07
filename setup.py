@@ -35,5 +35,6 @@ setup(
         "moviepy",
         "viser",
         "yourdfpy",
+        "prettytable",
     ]
 )

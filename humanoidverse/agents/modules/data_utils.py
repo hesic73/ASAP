@@ -1,5 +1,6 @@
 import torch
 from torch import nn, Tensor
+from prettytable import PrettyTable
 
 from typing import Dict, List, Tuple, Any, Union
 
@@ -14,7 +15,8 @@ def compute_returns(self, rewards, values, dones, last_values, gamma, lam):
             next_values = values[step + 1]
         next_is_not_terminal = 1.0 - dones[step].float()
         delta = (
-            rewards[step] + next_is_not_terminal * gamma * next_values - values[step]
+            rewards[step] + next_is_not_terminal *
+            gamma * next_values - values[step]
         )
         advantage = delta + next_is_not_terminal * gamma * lam * advantage
         returns[step] = advantage + values[step]
@@ -43,7 +45,8 @@ class RolloutStorage(nn.Module):
     def register_key(self, key: str, shape=(), dtype=torch.float):
         # This class was partially copied from https://github.com/NVlabs/ProtoMotions/blob/94059259ba2b596bf908828cc04e8fc6ff901114/phys_anim/agents/utils/data_utils.py
         assert not hasattr(self, key), key
-        assert isinstance(shape, (list, tuple)), "shape must be a list or tuple"
+        assert isinstance(shape, (list, tuple)
+                          ), "shape must be a list or tuple"
         buffer = torch.zeros(
             (self.num_transitions_per_env, self.num_envs) + shape,
             dtype=dtype,
@@ -87,13 +90,15 @@ class RolloutStorage(nn.Module):
         if self.saved_hidden_states_a is None:
             self.saved_hidden_states_a = [
                 torch.zeros(
-                    self.observations.shape[0], *hid_a[i].shape, device=self.device
+                    self.observations.shape[0], *
+                    hid_a[i].shape, device=self.device
                 )
                 for i in range(len(hid_a))
             ]
             self.saved_hidden_states_c = [
                 torch.zeros(
-                    self.observations.shape[0], *hid_c[i].shape, device=self.device
+                    self.observations.shape[0], *
+                    hid_c[i].shape, device=self.device
                 )
                 for i in range(len(hid_c))
             ]
@@ -176,7 +181,8 @@ class ReplayBuffer:
         assert key not in self._buffer_dict, f"Key {key} already registered"
         if isinstance(shape, int):
             shape = (shape,)
-        assert isinstance(shape, (list, tuple)), "shape must be a list or tuple"
+        assert isinstance(shape, (list, tuple)
+                          ), "shape must be a list or tuple"
         self._buffer_dict[key] = torch.zeros(
             (self._buffer_size, self.num_envs) + shape,
             dtype=dtype,
@@ -210,13 +216,16 @@ class ReplayBuffer:
     def sample(self, batch_size: int) -> Tuple[Dict[str, Tensor], Dict[str, Tensor]]:
         if self._full:
             batch_inds = (
-                torch.randint(1, self._buffer_size, (batch_size,), device=self.device)
+                torch.randint(1, self._buffer_size,
+                              (batch_size,), device=self.device)
                 + self._pos
             ) % self._buffer_size
         else:
-            batch_inds = torch.randint(0, self._pos, (batch_size,), device=self.device)
+            batch_inds = torch.randint(
+                0, self._pos, (batch_size,), device=self.device)
 
-        env_indices = torch.randint(0, self.num_envs, (batch_size,), device=self.device)
+        env_indices = torch.randint(
+            0, self.num_envs, (batch_size,), device=self.device)
 
         current_samples = {
             key: self._buffer_dict[key][batch_inds, env_indices]
@@ -232,3 +241,10 @@ class ReplayBuffer:
         }
 
         return current_samples, next_obs_samples
+
+    def __str__(self):
+        table = PrettyTable()
+        table.field_names = ["Key", "Shape", "Is Obs"]
+        for key, shape, is_obs in zip(self._buffer_dict.keys(), self._buffer_dict_shape.values(), self._buffer_dict_is_obs.values()):
+            table.add_row([key, shape, is_obs])
+        return table.get_string()

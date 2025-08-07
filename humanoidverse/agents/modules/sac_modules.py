@@ -81,9 +81,14 @@ class SACActor(nn.Module):
 
 class SACCritic(nn.Module):
     def __init__(
-        self, obs_dim_dict: Dict[str, int], module_config_dict: Dict[str, Any]
+        self, obs_dim_dict: Dict[str, int], module_config_dict: Dict[str, Any], num_actions: int
     ):
         super().__init__()
+
+        for idx, input_dim in enumerate(module_config_dict["input_dim"]):
+            if input_dim == "robot_action_dim":
+                module_config_dict["input_dim"][idx] = num_actions
+
         self.critic_module = BaseModule(obs_dim_dict, module_config_dict)
 
     @property
@@ -95,6 +100,7 @@ class SACCritic(nn.Module):
         critic_input = torch.cat([critic_obs, actions], dim=-1)
         value = self.critic(critic_input)
         return value
+
 
 class DoubleQCritic(torch.nn.Module):
     """Double Q-network for SAC algorithm."""
@@ -134,9 +140,11 @@ class DoubleQCritic(torch.nn.Module):
         for target_param, param in zip(
             self.target_critic_1.parameters(), self.critic_1.parameters()
         ):
-            target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+            target_param.data.copy_(
+                tau * param.data + (1 - tau) * target_param.data)
 
         for target_param, param in zip(
             self.target_critic_2.parameters(), self.critic_2.parameters()
         ):
-            target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+            target_param.data.copy_(
+                tau * param.data + (1 - tau) * target_param.data)

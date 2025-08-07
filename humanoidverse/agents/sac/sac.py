@@ -2,9 +2,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+import os
 
 from collections import deque
 from loguru import logger
+from rich.progress import Progress
 
 from omegaconf import DictConfig
 
@@ -27,13 +29,18 @@ def _dict_to_device(data_dict: Dict[str, torch.Tensor], device: torch.device):
 
 
 class SAC(BaseAlgo):
-    def __init__(self, env: BaseTask, config: DictConfig, device: torch.device):
+
+    def __init__(self, env: BaseTask, config: DictConfig, log_dir: str, device: torch.device):
         super().__init__(env, config, device)
+
+        self.log_dir = log_dir
 
         # Environment config
         self.num_envs = self.env.config.num_envs
         self.algo_obs_dim_dict = self.env.config.robot.algo_obs_dim_dict
-        self.num_act = self.env.config.robot.actions_dim
+        self.num_actions = self.env.config.robot.actions_dim
+
+        self.save_interval = self.config.save_interval
 
         # SAC specific config - all must be explicitly provided
         self.replay_buffer_size = self.config.replay_buffer_size
@@ -43,7 +50,7 @@ class SAC(BaseAlgo):
         self.target_update_frequency = self.config.target_update_frequency
         self.tau = self.config.tau
         self.gamma = self.config.gamma
-        
+
         # Off-policy training parameters
         self.samples_per_iter = self.config.samples_per_iter
         self.actor_steps = self.config.actor_steps
@@ -69,19 +76,21 @@ class SAC(BaseAlgo):
         # Episode tracking
         self.episode_rewards = deque(maxlen=100)
         self.episode_lengths = deque(maxlen=100)
-        self.current_episode_reward = torch.zeros(self.num_envs, device=self.device)
-        self.current_episode_length = torch.zeros(self.num_envs, device=self.device)
+        self.current_episode_reward = torch.zeros(
+            self.num_envs, device=self.device)
+        self.current_episode_length = torch.zeros(
+            self.num_envs, device=self.device)
 
     def setup(self):
         self.actor = SACActor(
             obs_dim_dict=self.algo_obs_dim_dict,
             module_config_dict=self.config.module_dict.actor,
-            num_actions=self.num_act,
+            num_actions=self.num_actions,
             init_noise_std=self.config.init_noise_std,
         ).to(self.device)
 
         def critic_factory():
-            return SACCritic(self.algo_obs_dim_dict, self.config.module_dict.critic)
+            return SACCritic(self.algo_obs_dim_dict, self.config.module_dict.critic, self.num_actions)
 
         self.double_q_critic = DoubleQCritic(
             critic_factory=critic_factory,
@@ -94,19 +103,22 @@ class SAC(BaseAlgo):
         self.critic_optimizer = optim.Adam(
             self.double_q_critic.parameters(), lr=self.critic_learning_rate
         )
-        self.alpha_optimizer = optim.Adam([self.log_alpha], lr=self.alpha_learning_rate)
+        self.alpha_optimizer = optim.Adam(
+            [self.log_alpha], lr=self.alpha_learning_rate)
 
         self.replay_buffer = ReplayBuffer(
-            buffer_size=self.replay_buffer_size,
+            buffer_size=int(self.replay_buffer_size),
             num_envs=self.num_envs,
             device="cpu",
         )
         for obs_key, obs_shape in self.algo_obs_dim_dict.items():
             self.replay_buffer.register_key(obs_key, obs_shape, is_obs=True)
 
-        self.replay_buffer.register_key("actions", (self.num_act,))
+        self.replay_buffer.register_key("actions", (self.num_actions,))
         self.replay_buffer.register_key("rewards", (1,))
         self.replay_buffer.register_key("dones", (1,), dtype=torch.bool)
+
+        logger.info(f"Replay buffer:\n{self.replay_buffer}")
 
     def learn(self):
         obs_dict = self.env.reset_all()
@@ -124,12 +136,13 @@ class SAC(BaseAlgo):
         ):
             # Collect samples_per_iter samples
             obs_dict = self._collect_samples(obs_dict, self.samples_per_iter)
-            
+
             # Perform multiple training steps
             self._training_phase()
-            
-            if iteration % 100 == 0:
-                logger.info(f"Iteration {iteration}, Buffer size: {self.replay_buffer.size()}")
+
+            if iteration % self.save_interval == 0:
+                self.save(os.path.join(self.log_dir,
+                          'model_{}.pt'.format(iteration)))
 
         self.current_learning_iteration += self.num_learning_iterations
 
@@ -143,7 +156,7 @@ class SAC(BaseAlgo):
         self.actor.eval()
         self.double_q_critic.eval()
 
-    def _collect_experience(self, obs_dict):
+    def _collect_experience(self, obs_dict: Dict[str, torch.Tensor]):
         """Collect one step of experience."""
         with torch.no_grad():
             # Select action
@@ -153,7 +166,6 @@ class SAC(BaseAlgo):
             actor_state = {"actions": actions}
             next_obs_dict, rewards, dones, infos = self.env.step(actor_state)
 
-            # Move to device
             next_obs_dict = _dict_to_device(next_obs_dict, self.device)
             rewards = rewards.to(self.device)
             dones = dones.to(self.device)
@@ -190,11 +202,13 @@ class SAC(BaseAlgo):
     def _collect_initial_samples(self, obs_dict):
         """Collect initial samples to populate replay buffer."""
         sample_count = 0
-        while sample_count < self.learning_starts:
-            obs_dict = self._collect_experience(obs_dict)
-            sample_count += self.num_envs
-            if sample_count % 1000 == 0:
-                logger.info(f"Collected {sample_count}/{self.learning_starts} initial samples")
+        with Progress() as progress:
+            task = progress.add_task(
+                "Collecting initial samples", total=self.learning_starts)
+            while sample_count < self.learning_starts:
+                obs_dict = self._collect_experience(obs_dict)
+                sample_count += self.num_envs
+                progress.update(task, advance=self.num_envs)
 
     def _collect_samples(self, obs_dict, num_samples):
         """Collect num_samples samples from environment."""
@@ -211,7 +225,7 @@ class SAC(BaseAlgo):
         for _ in range(self.critic_steps):
             critic_loss_1, critic_loss_2 = self._update_critics_step()
             critic_losses.append((critic_loss_1, critic_loss_2))
-        
+
         # Update actor and alpha for actor_steps
         actor_losses = []
         alpha_losses = []
@@ -219,37 +233,41 @@ class SAC(BaseAlgo):
             actor_loss, alpha_loss = self._update_actor_and_alpha_step()
             actor_losses.append(actor_loss)
             alpha_losses.append(alpha_loss)
-            
+
             # Update target networks
             if self.updates % self.target_update_frequency == 0:
                 self.double_q_critic.soft_update_targets(self.tau)
-            
+
             self.updates += 1
-        
+
         # Log average losses
         if critic_losses:
-            avg_critic_loss_1 = sum([c[0] for c in critic_losses]) / len(critic_losses)
-            avg_critic_loss_2 = sum([c[1] for c in critic_losses]) / len(critic_losses)
-            logger.info(f"Avg Critic Loss: Q1={avg_critic_loss_1:.4f}, Q2={avg_critic_loss_2:.4f}")
-        
+            avg_critic_loss_1 = sum(
+                [c[0] for c in critic_losses]) / len(critic_losses)
+            avg_critic_loss_2 = sum(
+                [c[1] for c in critic_losses]) / len(critic_losses)
+            logger.info(
+                f"Avg Critic Loss: Q1={avg_critic_loss_1:.4f}, Q2={avg_critic_loss_2:.4f}")
+
         if actor_losses:
             avg_actor_loss = sum(actor_losses) / len(actor_losses)
             avg_alpha_loss = sum(alpha_losses) / len(alpha_losses)
-            logger.info(f"Avg Actor Loss: {avg_actor_loss:.4f}, Avg Alpha Loss: {avg_alpha_loss:.4f}")
+            logger.info(
+                f"Avg Actor Loss: {avg_actor_loss:.4f}, Avg Alpha Loss: {avg_alpha_loss:.4f}")
 
     def _update_critics_step(self):
         """Single critic update step."""
         # Sample batch from replay buffer
-        current_samples, next_obs_samples = self.replay_buffer.sample(self.batch_size)
+        current_samples, next_obs_samples = self.replay_buffer.sample(
+            self.batch_size)
 
         # Move to device
-        for key in current_samples.keys():
-            current_samples[key] = current_samples[key].to(self.device)
-        for key in next_obs_samples.keys():
-            next_obs_samples[key] = next_obs_samples[key].to(self.device)
+        current_samples = _dict_to_device(current_samples, self.device)
+        next_obs_samples = _dict_to_device(next_obs_samples, self.device)
 
         # Extract data
-        obs = {k: v for k, v in current_samples.items() if k in self.algo_obs_dim_dict}
+        obs = {k: v for k, v in current_samples.items()
+               if k in self.algo_obs_dim_dict}
         actions = current_samples["actions"]
         rewards = current_samples["rewards"]
         dones = current_samples["dones"]
@@ -260,14 +278,15 @@ class SAC(BaseAlgo):
     def _update_actor_and_alpha_step(self):
         """Single actor and alpha update step."""
         # Sample batch from replay buffer
-        current_samples, next_obs_samples = self.replay_buffer.sample(self.batch_size)
+        current_samples, next_obs_samples = self.replay_buffer.sample(
+            self.batch_size)
 
         # Move to device
-        for key in current_samples.keys():
-            current_samples[key] = current_samples[key].to(self.device)
+        current_samples = _dict_to_device(current_samples, self.device)
 
         # Extract observations
-        obs = {k: v for k, v in current_samples.items() if k in self.algo_obs_dim_dict}
+        obs = {k: v for k, v in current_samples.items()
+               if k in self.algo_obs_dim_dict}
 
         return self._update_actor_and_alpha(obs)
 
@@ -276,16 +295,16 @@ class SAC(BaseAlgo):
         loss_dict = {}
 
         # Sample batch from replay buffer
-        current_samples, next_obs_samples = self.replay_buffer.sample(self.batch_size)
+        current_samples, next_obs_samples = self.replay_buffer.sample(
+            self.batch_size)
 
         # Move to device
-        for key in current_samples.keys():
-            current_samples[key] = current_samples[key].to(self.device)
-        for key in next_obs_samples.keys():
-            next_obs_samples[key] = next_obs_samples[key].to(self.device)
+        current_samples = _dict_to_device(current_samples, self.device)
+        next_obs_samples = _dict_to_device(next_obs_samples, self.device)
 
         # Extract data
-        obs = {k: v for k, v in current_samples.items() if k in self.algo_obs_dim_dict}
+        obs = {k: v for k, v in current_samples.items()
+               if k in self.algo_obs_dim_dict}
         actions = current_samples["actions"]
         rewards = current_samples["rewards"]
         dones = current_samples["dones"]
@@ -326,10 +345,12 @@ class SAC(BaseAlgo):
             ) - self.alpha * next_log_probs.unsqueeze(1)
 
             # Compute target values
-            target_values = rewards + self.gamma * (1 - dones.float()) * target_q
+            target_values = rewards + self.gamma * \
+                (1 - dones.float()) * target_q
 
         # Current Q values
-        current_q1, current_q2 = self.double_q_critic(obs["critic_obs"], actions)
+        current_q1, current_q2 = self.double_q_critic(
+            obs["critic_obs"], actions)
 
         # Critic losses
         critic_loss_1 = F.mse_loss(current_q1, target_values)
@@ -402,13 +423,16 @@ class SAC(BaseAlgo):
         loaded_dict = torch.load(ckpt_path, map_location=self.device)
 
         self.actor.load_state_dict(loaded_dict["actor_model_state_dict"])
-        self.double_q_critic.load_state_dict(loaded_dict["double_q_critic_state_dict"])
+        self.double_q_critic.load_state_dict(
+            loaded_dict["double_q_critic_state_dict"])
 
-        self.actor_optimizer.load_state_dict(loaded_dict["actor_optimizer_state_dict"])
+        self.actor_optimizer.load_state_dict(
+            loaded_dict["actor_optimizer_state_dict"])
         self.critic_optimizer.load_state_dict(
             loaded_dict["critic_optimizer_state_dict"]
         )
-        self.alpha_optimizer.load_state_dict(loaded_dict["alpha_optimizer_state_dict"])
+        self.alpha_optimizer.load_state_dict(
+            loaded_dict["alpha_optimizer_state_dict"])
 
         self.log_alpha = loaded_dict["log_alpha"]
         self.current_learning_iteration = loaded_dict["iter"]
@@ -432,7 +456,8 @@ class SAC(BaseAlgo):
         if self.config.eval_callbacks is not None:
             for cb in self.config.eval_callbacks:
                 self.eval_callbacks.append(
-                    instantiate(self.config.eval_callbacks[cb], training_loop=self)
+                    instantiate(
+                        self.config.eval_callbacks[cb], training_loop=self)
                 )
 
     def _pre_evaluate_policy(self, reset_env: bool = True):
@@ -468,7 +493,8 @@ class SAC(BaseAlgo):
         actor_state = self._create_actor_state()
         self.eval_policy = self._get_inference_policy()
         obs_dict = self.env.reset_all()
-        init_actions = torch.zeros(self.env.num_envs, self.num_act, device=self.device)
+        init_actions = torch.zeros(
+            self.env.num_envs, self.num_actions, device=self.device)
         actor_state.update({"obs": obs_dict, "actions": init_actions})
         actor_state = self._pre_eval_env_step(actor_state)
 
