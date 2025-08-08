@@ -166,7 +166,8 @@ class SAC(BaseAlgo):
             self.alpha_optimizer = optim.Adam(
                 [self.log_alpha], lr=self.alpha_learning_rate)
 
-        rb_device = self.device if self.replay_buffer_on_device else torch.device("cpu")
+        rb_device = self.device if self.replay_buffer_on_device else torch.device(
+            "cpu")
         self.replay_buffer = ReplayBuffer(
             buffer_size=int(self.replay_buffer_size),
             num_envs=self.num_envs,
@@ -184,13 +185,18 @@ class SAC(BaseAlgo):
     def _get_action_scaling(self):
         qpos_limits, _, _ = self.env.simulator.get_dof_limits_properties()
         qpos_limits = qpos_limits.cpu()  # (num_dof, 2)
+        default_dof_pos = self.env.default_dof_pos.cpu().squeeze(0)  # (num_dof,)
 
-        # NOTE (hsc): 这里environment自带一个scale。所以需要除以这个scale
+        # NOTE (hsc): _compute_torques里，target qpos的计算方式是
+        # actions * scale + default_dof_pos
+        # 所以raw_action_limits需要减去default_dof_pos，再除以action_scale
         _action_scale = self.env.action_scale
-        qpos_limits /= _action_scale
+        raw_action_limits = (
+            qpos_limits - default_dof_pos.unsqueeze(-1)) / _action_scale
 
-        action_scale = (qpos_limits[:, 1] - qpos_limits[:, 0]) / 2.0
-        action_bias = (qpos_limits[:, 1] + qpos_limits[:, 0]) / 2.0
+        action_scale = (
+            raw_action_limits[:, 1] - raw_action_limits[:, 0]) / 2.0
+        action_bias = (raw_action_limits[:, 1] + raw_action_limits[:, 0]) / 2.0
         return action_scale, action_bias
 
     def learn(self):
@@ -263,10 +269,13 @@ class SAC(BaseAlgo):
             # Store transition in replay buffer
             transition_data = {}
             for obs_key in obs_dict.keys():
-                transition_data[obs_key] = obs_dict[obs_key].to(self.replay_buffer.device)
+                transition_data[obs_key] = obs_dict[obs_key].to(
+                    self.replay_buffer.device)
             transition_data["actions"] = actions.to(self.replay_buffer.device)
-            transition_data["rewards"] = rewards.to(self.replay_buffer.device).unsqueeze(1)
-            transition_data["dones"] = dones.to(self.replay_buffer.device).unsqueeze(1)
+            transition_data["rewards"] = rewards.to(
+                self.replay_buffer.device).unsqueeze(1)
+            transition_data["dones"] = dones.to(
+                self.replay_buffer.device).unsqueeze(1)
 
             self.replay_buffer.add(transition_data)
 
@@ -525,10 +534,13 @@ class SAC(BaseAlgo):
         # Load alpha settings (explicit, no fallbacks)
         if loaded_dict["autotune_alpha"]:
             with torch.no_grad():
-                self.log_alpha.data.copy_(loaded_dict["log_alpha"].to(self.device))
-            self.alpha_optimizer.load_state_dict(loaded_dict["alpha_optimizer_state_dict"])
+                self.log_alpha.data.copy_(
+                    loaded_dict["log_alpha"].to(self.device))
+            self.alpha_optimizer.load_state_dict(
+                loaded_dict["alpha_optimizer_state_dict"])
         else:
-            self.alpha_value = torch.as_tensor(loaded_dict["alpha_value"], device=self.device)
+            self.alpha_value = torch.as_tensor(
+                loaded_dict["alpha_value"], device=self.device)
 
         self.current_learning_iteration = loaded_dict["iter"]
         self.total_steps = loaded_dict["total_steps"]
@@ -585,7 +597,7 @@ class SAC(BaseAlgo):
     def evaluate_policy(self, max_steps: Optional[int] = None):
         self._create_eval_callbacks()
         self._pre_evaluate_policy()
-        actor_state = self._create_actor_state()
+        actor_state = {"done_indices": [], "stop": False}
         self.eval_policy = self._get_inference_policy()
         obs_dict = self.env.reset_all()
         init_actions = torch.zeros(
@@ -755,3 +767,19 @@ class SAC(BaseAlgo):
             {"obs": obs_dict, "rewards": rewards, "dones": dones, "extras": extras}
         )
         return actor_state
+
+    @torch.no_grad()
+    def get_example_obs(self):
+        obs_dict = self.env.reset_all()
+        for obs_key in obs_dict.keys():
+            print(obs_key, sorted(self.env.config.obs.obs_dict[obs_key]))
+        # move to cpu
+        for k in obs_dict:
+            obs_dict[k] = obs_dict[k].cpu()
+        return obs_dict
+
+    def _get_inference_policy(self, device: Optional[torch.device] = None):
+        self.actor.eval()
+        if device is not None:
+            self.actor.to(device)
+        return self.actor.act_inference

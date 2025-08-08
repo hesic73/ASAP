@@ -23,9 +23,9 @@ algo:
     target_entropy: "auto"  # Target entropy for autotuning (auto = -action_dim)
     
     # Training parameters
-    samples_per_iter: 512
+    samples_per_iter: 4096
     policy_frequency: 2  # How often to update policy (delayed updates like TD3)
-    gradient_steps: 1  # How many gradient updates after each env step
+    gradient_steps: 4  # How many gradient updates after each env step
     replay_buffer_on_device: false  # If true, place replay buffer tensors on the same device as the model (e.g., GPU)
 
     save_interval: 1000
