@@ -202,9 +202,15 @@ class SAC(BaseAlgo):
         raw_action_limits = (
             qpos_limits - default_dof_pos.unsqueeze(-1)) / _action_scale
 
-        action_scale = (
-            raw_action_limits[:, 1] - raw_action_limits[:, 0]) / 2.0
-        action_bias = (raw_action_limits[:, 1] + raw_action_limits[:, 0]) / 2.0
+        # action_scale = (
+        #     raw_action_limits[:, 1] - raw_action_limits[:, 0]) / 2.0
+        # action_bias = (raw_action_limits[:, 1] + raw_action_limits[:, 0]) / 2.0
+
+        # NOTE (hsc): 我非常怀疑这里有问题。因为语义上，action=0对应的是default_dof_pos。而dof limit是不对称的。
+        # 所以action_bias会导致它的分布发生偏移。
+        action_scale = torch.maximum(
+            torch.abs(raw_action_limits[:, 1]), torch.abs(raw_action_limits[:, 0]))
+        action_bias = torch.zeros(self.num_actions, device='cpu')
         return action_scale, action_bias
 
     def learn(self):
@@ -232,6 +238,8 @@ class SAC(BaseAlgo):
                 'loss_dict': loss_dict,
                 'grad_norms': info_dict['grad_norms'],
                 'q_values': info_dict['q_values'],
+                'alpha_value': self.alpha.item() if isinstance(
+                    self.alpha, torch.Tensor) else self.alpha,
                 'collection_time': info_dict['collection_time'],
                 'learn_time': info_dict['learn_time'],
                 'training_steps': info_dict['training_steps'],
@@ -338,7 +346,7 @@ class SAC(BaseAlgo):
         """Collect samples and train online (like CleanRL)."""
         sample_count = 0
         loss_dict = {'Critic_Q1': [], 'Critic_Q2': [],
-                     'Actor': [], 'Alpha': [], 'Alpha_Value': []}
+                     'Actor': [], 'Alpha': [], 'Actor_Entropy_Term': [], 'Actor_Q_Term': []}
         grad_norm_dict = {'Critic_Grad_Norm': [], 'Actor_Grad_Norm': []}
         q_values_dict = {'Mean_Q1': [], 'Mean_Q2': [], 'Mean_Target_Q': []}
 
@@ -370,14 +378,18 @@ class SAC(BaseAlgo):
                 if self.updates % self.policy_frequency == 0:
                     # Compensate for delay by doing policy_frequency updates
                     for _ in range(self.policy_frequency):
-                        actor_loss, alpha_loss, actor_grad_norm = self._update_actor_and_alpha_step()
+                        actor_loss, alpha_loss, actor_grad_norm, entropy_term, q_term = self._update_actor_and_alpha_step()
                         loss_dict['Actor'].append(actor_loss)
                         loss_dict['Alpha'].append(alpha_loss)
                         grad_norm_dict['Actor_Grad_Norm'].append(
                             actor_grad_norm)
-                        alpha_val = self.alpha.item() if isinstance(
-                            self.alpha, torch.Tensor) else self.alpha
-                        loss_dict['Alpha_Value'].append(alpha_val)
+                        # Log actor loss components
+                        if 'Actor_Entropy_Term' not in loss_dict:
+                            loss_dict['Actor_Entropy_Term'] = []
+                        if 'Actor_Q_Term' not in loss_dict:
+                            loss_dict['Actor_Q_Term'] = []
+                        loss_dict['Actor_Entropy_Term'].append(entropy_term)
+                        loss_dict['Actor_Q_Term'].append(q_term)
 
                 # Update target networks
                 if self.updates % self.target_update_frequency == 0:
@@ -393,12 +405,7 @@ class SAC(BaseAlgo):
             if values:
                 averaged_loss_dict[key] = sum(values) / len(values)
             else:
-                if key == 'Alpha_Value':
-                    alpha_val = self.alpha.item() if isinstance(
-                        self.alpha, torch.Tensor) else self.alpha
-                    averaged_loss_dict[key] = alpha_val
-                else:
-                    averaged_loss_dict[key] = 0.0
+                averaged_loss_dict[key] = 0.0
 
         # Average the gradient norms
         averaged_grad_norm_dict = {}
@@ -510,12 +517,18 @@ class SAC(BaseAlgo):
 
         # Q values for sampled actions (critic outputs normalized Q)
         q1_n, q2_n = self.double_q_critic(obs["critic_obs"], actions)
-        q1_u = self.q_normalizer.unnormalize(q1_n)
-        q2_u = self.q_normalizer.unnormalize(q2_n)
-        q_min_u = torch.min(q1_u, q2_u)
+        q_min_n = torch.min(q1_n, q2_n)
 
-        # Actor loss
-        actor_loss = (self.alpha * log_probs.unsqueeze(1) - q_min_u).mean()
+        # NOTE (hsc): 我normalize了Q，那我需不需要normalize alpha
+        alpha_scaled = self.alpha/self.q_normalizer.std
+        entropy_term = alpha_scaled * log_probs.unsqueeze(1)
+        q_term = q_min_n
+        actor_loss = (entropy_term - q_term).mean()
+
+        # Log actor loss components for monitoring
+        with torch.no_grad():
+            mean_entropy_term = entropy_term.mean().item()
+            mean_q_term = q_term.mean().item()
 
         # Update actor
         self.actor_optimizer.zero_grad()
@@ -534,10 +547,10 @@ class SAC(BaseAlgo):
             alpha_loss.backward()
             self.alpha_optimizer.step()
 
-            return actor_loss.item(), alpha_loss.item(), actor_grad_norm.item()
+            return actor_loss.item(), alpha_loss.item(), actor_grad_norm.item(), mean_entropy_term, mean_q_term
         else:
             # No alpha loss when using fixed alpha
-            return actor_loss.item(), 0.0, actor_grad_norm.item()
+            return actor_loss.item(), 0.0, actor_grad_norm.item(), mean_entropy_term, mean_q_term
 
     @property
     def alpha(self):
@@ -755,7 +768,13 @@ class SAC(BaseAlgo):
         if log_dict['loss_dict']:
             loss_string = ""
             for loss_name, loss_value in log_dict['loss_dict'].items():
-                loss_string += f"""{f'{loss_name} Loss:':>{pad}} {loss_value:.4f}\n"""
+                if loss_name in ['Actor_Entropy_Term', 'Actor_Q_Term']:
+                    # Special formatting for actor components
+                    component_name = loss_name.replace(
+                        'Actor_', '').replace('_', ' ')
+                    loss_string += f"""{f'{component_name}:':>{pad}} {loss_value:.4f}\n"""
+                else:
+                    loss_string += f"""{f'{loss_name} Loss:':>{pad}} {loss_value:.4f}\n"""
             log_string += loss_string
 
         # Add gradient norm information
@@ -862,6 +881,18 @@ class SAC(BaseAlgo):
             for q_name, q_value in log_dict['q_values'].items():
                 self.writer.add_scalar(
                     f'QValues/{q_name}', q_value, log_dict['it'])
+
+        # Actor loss components
+        if 'Actor_Entropy_Term' in log_dict['loss_dict']:
+            self.writer.add_scalar(
+                'ActorComponents/Entropy_Term', log_dict['loss_dict']['Actor_Entropy_Term'], log_dict['it'])
+        if 'Actor_Q_Term' in log_dict['loss_dict']:
+            self.writer.add_scalar(
+                'ActorComponents/Q_Term', log_dict['loss_dict']['Actor_Q_Term'], log_dict['it'])
+
+        if 'alpha_value' in log_dict:
+            self.writer.add_scalar(
+                'Policy/alpha_value', log_dict['alpha_value'], log_dict['it'])
 
     def env_step(self, actor_state):
         """Environment step for evaluation."""

@@ -7,14 +7,14 @@ algo:
     # SAC specific parameters
     replay_buffer_size: 1e6
     batch_size: 4096
-    learning_starts: 25000
+    learning_starts: ${eval:'2 * ${algo.config.batch_size} * ${algo.config.gradient_steps} *8'}
     target_update_frequency: 1
     tau: 0.005
     gamma: 0.99
     
     # Learning rates
     actor_learning_rate: 3e-5
-    critic_learning_rate: 3e-5  # Lower for stability
+    critic_learning_rate: 3e-5
     alpha_learning_rate: 3e-5
     
     # Entropy regularization
@@ -25,7 +25,7 @@ algo:
     # Training parameters
     samples_per_iter: 4096
     policy_frequency: 2  # How often to update policy (delayed updates like TD3)
-    gradient_steps: 4  # How many gradient updates after each env step
+    gradient_steps: 1  # How many gradient updates after each env step
     replay_buffer_on_device: false  # If true, place replay buffer tensors on the same device as the model (e.g., GPU)
 
     save_interval: 1000
