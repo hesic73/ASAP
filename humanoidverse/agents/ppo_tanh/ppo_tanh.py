@@ -538,6 +538,17 @@ class PPO_Tanh(BaseAlgo):
         gaussian_std_mean = torch.mean(sigma_batch)
         metrics_dict['Gaussian_Std'] = gaussian_std_mean.item()
 
+        # Add action mean and gaussian mean metrics
+        action_mean_batch = self.actor.action_mean
+        gaussian_mean_batch = self.actor.gaussian_mean
+        
+        # Compute mean across batch and action dimensions
+        action_mean_avg = torch.mean(action_mean_batch)
+        gaussian_mean_avg = torch.mean(gaussian_mean_batch)
+        
+        metrics_dict['Action_Mean'] = action_mean_avg.item()
+        metrics_dict['Gaussian_Mean'] = gaussian_mean_avg.item()
+
         loss_dict['Value'] += value_loss.item()
         loss_dict['Surrogate'] += surrogate_loss.item()
         loss_dict['Entropy'] += entropy_loss.item()
@@ -617,6 +628,8 @@ class PPO_Tanh(BaseAlgo):
                 if k == 'KL_Divergence':
                     entry = f"{f'{k}:':>{pad}} {v:.6f}"
                 elif k == 'Gaussian_Std':
+                    entry = f"{f'{k}:':>{pad}} {v:.4f}"
+                elif k == 'Action_Mean' or k == 'Gaussian_Mean':
                     entry = f"{f'{k}:':>{pad}} {v:.4f}"
                 else:
                     entry = f"{f'{k}:':>{pad}} {v:.4f}"

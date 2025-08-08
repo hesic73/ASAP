@@ -145,6 +145,17 @@ class PPOActorTanh(nn.Module):
         return self.distribution.mean
 
     @property
+    def action_mean(self):
+        """Return the mean of the transformed (tanh) distribution."""
+        if self.distribution is None:
+            return None
+        # For tanh-transformed distribution, we approximate the mean
+        # by transforming the Gaussian mean
+        gaussian_mean = self.distribution.mean
+        tanh_mean = torch.tanh(gaussian_mean)
+        return tanh_mean * self.action_scale + self.action_bias
+
+    @property
     def gaussian_std(self):
         """
         NOTE (hsc): Used when calculating the KL divergence between the old and new policy.
