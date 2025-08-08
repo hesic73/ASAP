@@ -7,6 +7,8 @@ from torch.distributions import Normal
 
 from .modules import BaseModule
 
+from typing import Dict, Any
+
 
 class PPOActor(nn.Module):
     def __init__(self,
@@ -79,6 +81,157 @@ class PPOActor(nn.Module):
     def to_cpu(self):
         self.actor = deepcopy(self.actor).to('cpu')
         self.std.to('cpu')
+
+
+class PPOActorTanh(nn.Module):
+    def __init__(
+        self,
+        obs_dim_dict: Dict[str, int],
+        module_config_dict: Dict[str, Any],
+        num_actions: int,
+        action_scale: torch.Tensor = None,
+        action_bias: torch.Tensor = None,
+    ):
+        super().__init__()
+
+        # Modify config to output 2 * num_actions (mean and log_std)
+        module_config_dict = self._process_module_config(
+            module_config_dict, num_actions * 2
+        )
+
+        self.actor_module = BaseModule(obs_dim_dict, module_config_dict)
+        self.num_actions = num_actions
+
+        # Log std bounds for stability (from CleanRL)
+        self.LOG_STD_MAX = 2
+        self.LOG_STD_MIN = -5
+
+        # Action scaling for bounded action spaces
+        if action_scale is not None:
+            self.register_buffer("action_scale", action_scale)
+            self.register_buffer("action_bias", action_bias)
+        else:
+            # Default to [-1, 1] if not provided
+            self.register_buffer("action_scale", torch.ones(num_actions))
+            self.register_buffer("action_bias", torch.zeros(num_actions))
+
+        self.distribution = None
+        # disable args validation for speedup
+        Normal.set_default_validate_args = False
+
+    def _process_module_config(
+        self, module_config_dict: Dict[str, Any], output_dim: int
+    ) -> Dict[str, Any]:
+        for idx, dim in enumerate(module_config_dict["output_dim"]):
+            if dim == "robot_action_dim":
+                module_config_dict["output_dim"][idx] = output_dim
+        return module_config_dict
+
+    @property
+    def actor(self):
+        return self.actor_module
+
+    def reset(self, dones=None):
+        pass
+
+    def forward(self):
+        raise NotImplementedError
+
+    @property
+    def action_mean(self):
+        """Return the mean of the transformed (tanh) distribution."""
+        if self.distribution is None:
+            return None
+        # For tanh-transformed distribution, we approximate the mean
+        # by transforming the Gaussian mean
+        gaussian_mean = self.distribution.mean
+        tanh_mean = torch.tanh(gaussian_mean)
+        return tanh_mean * self.action_scale + self.action_bias
+
+    def estimate_action_std(self):
+        """Estimate the standard deviation of the transformed (tanh) distribution using sampling."""
+        if self.distribution is None:
+            return None
+        # For tanh-transformed distribution, we use sample-based estimation
+        # since there's no closed-form solution
+        with torch.no_grad():
+            # Sample from the base Gaussian distribution
+            samples = self.distribution.sample(
+                ())  # Use samples for estimation
+            # Apply tanh transformation and scaling
+            tanh_samples = torch.tanh(samples)
+            scaled_samples = tanh_samples * self.action_scale + self.action_bias
+            # Compute empirical standard deviation
+            empirical_std = scaled_samples.std(dim=0)
+        return empirical_std
+
+    def estimate_entropy(self):
+        """Estimate the entropy of the transformed (tanh) distribution using sampling."""
+        if self.distribution is None:
+            return None
+
+        # Sample-based entropy estimation: H(Y) = -E[log p(Y)]
+        with torch.no_grad():
+            # Sample from the base Gaussian distribution and transform
+            gaussian_samples = self.distribution.sample(())
+            tanh_samples = torch.tanh(gaussian_samples)
+            scaled_samples = tanh_samples * self.action_scale + self.action_bias
+
+            # Compute log probabilities of the transformed samples
+            log_probs = self.get_actions_log_prob(scaled_samples)
+            # Estimate entropy
+            entropy = -log_probs.mean()
+        return entropy
+
+    def update_distribution(self, actor_obs: torch.Tensor):
+        """Update internal distribution based on current observations."""
+        output = self.actor_module(actor_obs)
+        mean, log_std = output.chunk(2, dim=-1)
+
+        # Clamp log_std for stability
+        log_std = torch.tanh(log_std)
+        log_std = self.LOG_STD_MIN + 0.5 * \
+            (self.LOG_STD_MAX - self.LOG_STD_MIN) * (log_std + 1)
+        std = log_std.exp()
+
+        self.distribution = Normal(mean, std)
+
+    def act(self, actor_obs: torch.Tensor, **kwargs):
+        """Stochastic action sampling with tanh transformation."""
+        self.update_distribution(actor_obs)
+        # Reparameterization trick
+        x_t = self.distribution.rsample()
+        # Tanh transformation
+        y_t = torch.tanh(x_t)
+        # Scale to action space
+        action = y_t * self.action_scale + self.action_bias
+        return action
+
+    def get_actions_log_prob(self, actions: torch.Tensor):
+        """Get log probability of given actions."""
+        # Convert actions back to pre-tanh space for log_prob calculation
+        y_t = (actions - self.action_bias) / self.action_scale
+        # Clamp to avoid numerical issues with atanh
+        y_t = torch.clamp(y_t, -0.999, 0.999)
+        x_t = torch.atanh(y_t)
+
+        # Get log prob in pre-tanh space
+        log_prob = self.distribution.log_prob(x_t)
+        # Apply tanh correction
+        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
+        return log_prob.sum(dim=-1)
+
+    def act_inference(self, actor_obs: torch.Tensor):
+        """Deterministic action for inference."""
+        output = self.actor_module(actor_obs)
+        mean, _ = output.chunk(2, dim=-1)
+        # Use mean action with tanh and scaling
+        y_t = torch.tanh(mean)
+        action = y_t * self.action_scale + self.action_bias
+        return action
+
+    def to_cpu(self):
+        self.actor_module = deepcopy(self.actor_module).to("cpu")
 
 
 class PPOCritic(nn.Module):
