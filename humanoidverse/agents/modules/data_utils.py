@@ -2,7 +2,7 @@ import torch
 from torch import nn, Tensor
 from prettytable import PrettyTable
 
-from typing import Dict, List, Tuple, Any, Union
+from typing import Dict, List, Tuple, Union
 
 
 def compute_returns(self, rewards, values, dones, last_values, gamma, lam):
@@ -200,7 +200,7 @@ class ReplayBuffer:
         self._pos = 0
         self._full = False
 
-    def add(self, data_dict: Dict[str, Tensor]):
+    def add(self, data_dict: Dict[str, Tensor], next_obs_dict:Dict[str, Tensor]):
         for key, data in data_dict.items():
             assert key in self._buffer_dict, f"Key {key} not registered"
             expected_shape = (self.num_envs, *self._buffer_dict_shape[key])
@@ -208,6 +208,19 @@ class ReplayBuffer:
                 f"{key} data shape {data.shape} does not match buffer shape. Expected {expected_shape}"
             )
             self._buffer_dict[key][self._pos] = data
+
+        # Write next observations into the next index for obs keys
+        if next_obs_dict is not None:
+            next_index = (self._pos + 1) % self._buffer_size
+            for key, is_obs in self._buffer_dict_is_obs.items():
+                if is_obs:
+                    assert key in next_obs_dict, f"Missing next_obs for key {key}"
+                    next_data = next_obs_dict[key]
+                    expected_shape = (self.num_envs, *self._buffer_dict_shape[key])
+                    assert next_data.shape == expected_shape, (
+                        f"next {key} data shape {next_data.shape} does not match buffer shape. Expected {expected_shape}"
+                    )
+                    self._buffer_dict[key][next_index] = next_data
         self._pos += 1
         if self._pos == self._buffer_size:
             self._full = True

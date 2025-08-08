@@ -14,12 +14,12 @@ algo:
     
     # Learning rates
     actor_learning_rate: 3e-5
-    critic_learning_rate: 3e-5
+    critic_learning_rate: 3e-5  # Lower for stability
     alpha_learning_rate: 3e-5
     
     # Entropy regularization
     autotune_alpha: false  # Set to true for automatic alpha tuning
-    alpha: 0.05  # Fixed alpha value (used when autotune_alpha is false)
+    alpha: 0.2  # Fixed alpha value (used when autotune_alpha is false)
     target_entropy: "auto"  # Target entropy for autotuning (auto = -action_dim)
     
     # Training parameters
@@ -29,6 +29,10 @@ algo:
     replay_buffer_on_device: false  # If true, place replay buffer tensors on the same device as the model (e.g., GPU)
 
     save_interval: 1000
+    
+    # Optimization safety
+    actor_max_grad_norm: 5.0
+    critic_max_grad_norm: 1.0  # Separate clipping for critic (more aggressive)
     
     # General training config
     num_learning_iterations: 100000

@@ -65,6 +65,8 @@ class SAC(BaseAlgo):
         self.samples_per_iter = self.config.samples_per_iter
         self.policy_frequency = self.config.policy_frequency
         self.gradient_steps = self.config.gradient_steps
+        self.actor_max_grad_norm = self.config.actor_max_grad_norm
+        self.critic_max_grad_norm = self.config.critic_max_grad_norm
 
         self.replay_buffer_on_device = self.config.replay_buffer_on_device
 
@@ -204,10 +206,9 @@ class SAC(BaseAlgo):
         obs_dict = _dict_to_device(obs_dict, self.device)
         self._train_mode()
 
-        # Collect initial samples if needed
-        if self.replay_buffer.size() < self.learning_starts:
-            logger.info(f"Collecting {self.learning_starts} initial samples")
-            self._collect_initial_samples(obs_dict, self.learning_starts)
+        # Collect initial samples
+        logger.info(f"Collecting {self.learning_starts} initial samples")
+        self._collect_initial_samples(obs_dict, self.learning_starts)
 
         for iteration in range(
             self.current_learning_iteration,
@@ -223,6 +224,8 @@ class SAC(BaseAlgo):
             log_dict = {
                 'it': iteration,
                 'loss_dict': loss_dict,
+                'grad_norms': info_dict['grad_norms'],
+                'q_values': info_dict['q_values'],
                 'collection_time': info_dict['collection_time'],
                 'learn_time': info_dict['learn_time'],
                 'training_steps': info_dict['training_steps'],
@@ -277,7 +280,7 @@ class SAC(BaseAlgo):
             transition_data["dones"] = dones.to(
                 self.replay_buffer.device).unsqueeze(1)
 
-            self.replay_buffer.add(transition_data)
+            self.replay_buffer.add(transition_data, next_obs_dict=next_obs_dict)
 
             # Update episode tracking
             self.current_episode_reward += rewards
@@ -329,6 +332,8 @@ class SAC(BaseAlgo):
         sample_count = 0
         loss_dict = {'Critic_Q1': [], 'Critic_Q2': [],
                      'Actor': [], 'Alpha': [], 'Alpha_Value': []}
+        grad_norm_dict = {'Critic_Grad_Norm': [], 'Actor_Grad_Norm': []}
+        q_values_dict = {'Mean_Q1': [], 'Mean_Q2': [], 'Mean_Target_Q': []}
 
         collection_time = 0.0
         training_time = 0.0
@@ -346,17 +351,22 @@ class SAC(BaseAlgo):
             # Perform gradient_steps updates per env step
             for _ in range(self.gradient_steps):
                 # Update critics every update
-                critic_loss_1, critic_loss_2 = self._update_critics_step()
+                critic_loss_1, critic_loss_2, critic_grad_norm, mean_q1, mean_q2, mean_target_q = self._update_critics_step()
                 loss_dict['Critic_Q1'].append(critic_loss_1)
                 loss_dict['Critic_Q2'].append(critic_loss_2)
+                grad_norm_dict['Critic_Grad_Norm'].append(critic_grad_norm)
+                q_values_dict['Mean_Q1'].append(mean_q1)
+                q_values_dict['Mean_Q2'].append(mean_q2)
+                q_values_dict['Mean_Target_Q'].append(mean_target_q)
 
                 # Update actor and alpha with policy frequency (delayed updates)
                 if self.updates % self.policy_frequency == 0:
                     # Compensate for delay by doing policy_frequency updates
                     for _ in range(self.policy_frequency):
-                        actor_loss, alpha_loss = self._update_actor_and_alpha_step()
+                        actor_loss, alpha_loss, actor_grad_norm = self._update_actor_and_alpha_step()
                         loss_dict['Actor'].append(actor_loss)
                         loss_dict['Alpha'].append(alpha_loss)
+                        grad_norm_dict['Actor_Grad_Norm'].append(actor_grad_norm)
                         alpha_val = self.alpha.item() if isinstance(
                             self.alpha, torch.Tensor) else self.alpha
                         loss_dict['Alpha_Value'].append(alpha_val)
@@ -382,11 +392,29 @@ class SAC(BaseAlgo):
                 else:
                     averaged_loss_dict[key] = 0.0
 
+        # Average the gradient norms
+        averaged_grad_norm_dict = {}
+        for key, values in grad_norm_dict.items():
+            if values:
+                averaged_grad_norm_dict[key] = sum(values) / len(values)
+            else:
+                averaged_grad_norm_dict[key] = 0.0
+
+        # Average the Q values
+        averaged_q_values_dict = {}
+        for key, values in q_values_dict.items():
+            if values:
+                averaged_q_values_dict[key] = sum(values) / len(values)
+            else:
+                averaged_q_values_dict[key] = 0.0
+
         info_dict = {
             'training_steps': (num_samples // self.num_envs) * max(1, self.gradient_steps),
             'buffer_size': self.replay_buffer.size(),
             'collection_time': collection_time,
             'learn_time': training_time,
+            'grad_norms': averaged_grad_norm_dict,
+            'q_values': averaged_q_values_dict,
         }
 
         return obs_dict, averaged_loss_dict, info_dict
@@ -440,9 +468,15 @@ class SAC(BaseAlgo):
         # Update critics
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
+        critic_grad_norm = torch.nn.utils.clip_grad_norm_(self.double_q_critic.parameters(), self.critic_max_grad_norm)
         self.critic_optimizer.step()
 
-        return critic_loss_1.item(), critic_loss_2.item()
+        # Log Q values for monitoring
+        mean_q1 = current_q1.mean().item()
+        mean_q2 = current_q2.mean().item()
+        mean_target_q = target_values.mean().item()
+
+        return critic_loss_1.item(), critic_loss_2.item(), critic_grad_norm.item(), mean_q1, mean_q2, mean_target_q
 
     def _update_actor_and_alpha_step(self):
         """Single actor and alpha update step."""
@@ -471,6 +505,7 @@ class SAC(BaseAlgo):
         # Update actor
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
+        actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.actor_max_grad_norm)
         self.actor_optimizer.step()
 
         # Update alpha (temperature parameter) if autotuning
@@ -483,9 +518,9 @@ class SAC(BaseAlgo):
             alpha_loss.backward()
             self.alpha_optimizer.step()
 
-            return actor_loss.item(), alpha_loss.item()
+            return actor_loss.item(), alpha_loss.item(), actor_grad_norm.item()
         else:
-            return actor_loss.item(), 0.0  # No alpha loss when using fixed alpha
+            return actor_loss.item(), 0.0, actor_grad_norm.item()  # No alpha loss when using fixed alpha
 
     @property
     def alpha(self):
@@ -688,6 +723,20 @@ class SAC(BaseAlgo):
                 loss_string += f"""{f'{loss_name} Loss:':>{pad}} {loss_value:.4f}\n"""
             log_string += loss_string
 
+        # Add gradient norm information
+        if 'grad_norms' in log_dict and log_dict['grad_norms']:
+            grad_norm_string = ""
+            for grad_name, grad_value in log_dict['grad_norms'].items():
+                grad_norm_string += f"""{f'{grad_name}:':>{pad}} {grad_value:.4f}\n"""
+            log_string += grad_norm_string
+
+        # Add Q values information
+        if 'q_values' in log_dict and log_dict['q_values']:
+            q_values_string = ""
+            for q_name, q_value in log_dict['q_values'].items():
+                q_values_string += f"""{f'{q_name}:':>{pad}} {q_value:.4f}\n"""
+            log_string += q_values_string
+
         log_string += (f"""{'-' * width}\n"""
                        f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
                        f"""{'Total updates:':>{pad}} {self.updates}\n"""
@@ -759,6 +808,16 @@ class SAC(BaseAlgo):
         if len(env_log_dict) > 0:
             for k, v in env_log_dict.items():
                 self.writer.add_scalar(k, v, log_dict['it'])
+
+        # Gradient norm metrics
+        if 'grad_norms' in log_dict:
+            for grad_name, grad_value in log_dict['grad_norms'].items():
+                self.writer.add_scalar(f'GradNorm/{grad_name}', grad_value, log_dict['it'])
+
+        # Q values metrics
+        if 'q_values' in log_dict:
+            for q_name, q_value in log_dict['q_values'].items():
+                self.writer.add_scalar(f'QValues/{q_name}', q_value, log_dict['it'])
 
     def env_step(self, actor_state):
         """Environment step for evaluation."""
