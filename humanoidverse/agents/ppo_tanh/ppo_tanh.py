@@ -233,7 +233,7 @@ class PPO_Tanh(BaseAlgo):
             # Otherwise, we will keep using the initial obs_dict for the whole training process
             obs_dict = self._rollout_step(obs_dict)
 
-            loss_dict = self._training_step()
+            loss_dict, metrics_dict = self._training_step()
 
             self.stop_time = time.time()
             self.learn_time = self.stop_time - self.start_time
@@ -242,6 +242,7 @@ class PPO_Tanh(BaseAlgo):
             log_dict = {
                 'it': it,
                 'loss_dict': loss_dict,
+                'metrics_dict': metrics_dict,
                 'collection_time': self.collection_time,
                 'learn_time': self.learn_time,
                 'ep_infos': self.ep_infos,
@@ -405,6 +406,7 @@ class PPO_Tanh(BaseAlgo):
 
     def _training_step(self):
         loss_dict = self._init_loss_dict_at_training_step()
+        metrics_dict = {}
 
         generator = self.storage.mini_batch_generator(
             self.num_mini_batches, self.num_learning_epochs)
@@ -414,13 +416,16 @@ class PPO_Tanh(BaseAlgo):
             for policy_state_key in policy_state_dict.keys():
                 policy_state_dict[policy_state_key] = policy_state_dict[policy_state_key].to(
                     self.device)
-            loss_dict = self._update_algo_step(policy_state_dict, loss_dict)
+            loss_dict, metrics_dict = self._update_algo_step(
+                policy_state_dict, loss_dict, metrics_dict)
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         for key in loss_dict.keys():
             loss_dict[key] /= num_updates
+        for key in metrics_dict.keys():
+            metrics_dict[key] /= num_updates
         self.storage.clear()
-        return loss_dict
+        return loss_dict, metrics_dict
 
     def _init_loss_dict_at_training_step(self):
         loss_dict = {}
@@ -429,9 +434,15 @@ class PPO_Tanh(BaseAlgo):
         loss_dict['Entropy'] = 0
         return loss_dict
 
-    def _update_algo_step(self, policy_state_dict, loss_dict):
-        loss_dict = self._update_ppo(policy_state_dict, loss_dict)
-        return loss_dict
+    def _update_algo_step(self, policy_state_dict, loss_dict, metrics_dict):
+        loss_dict, batch_metrics_dict = self._update_ppo(
+            policy_state_dict, loss_dict)
+        # Accumulate metrics
+        for key, value in batch_metrics_dict.items():
+            if key not in metrics_dict:
+                metrics_dict[key] = 0
+            metrics_dict[key] += value
+        return loss_dict, metrics_dict
 
     def _actor_act_step(self, obs_dict):
         return self.actor.act(obs_dict["actor_obs"])
@@ -456,6 +467,7 @@ class PPO_Tanh(BaseAlgo):
         entropy_batch = self.actor.estimate_entropy()
 
         # KL
+        kl_mean = None
         if self.desired_kl != None and self.schedule == 'adaptive':
             with torch.inference_mode():
                 kl = torch.sum(
@@ -515,10 +527,21 @@ class PPO_Tanh(BaseAlgo):
         self.actor_optimizer.step()
         self.critic_optimizer.step()
 
+        # Create metrics dict for non-loss metrics
+        metrics_dict = {}
+
+        # Add KL divergence if available (from adaptive scheduler)
+        if kl_mean is not None:
+            metrics_dict['KL_Divergence'] = kl_mean.item()
+
+        # Add gaussian standard deviation
+        gaussian_std_mean = torch.mean(sigma_batch)
+        metrics_dict['Gaussian_Std'] = gaussian_std_mean.item()
+
         loss_dict['Value'] += value_loss.item()
         loss_dict['Surrogate'] += surrogate_loss.item()
         loss_dict['Entropy'] += entropy_loss.item()
-        return loss_dict
+        return loss_dict, metrics_dict
 
     def set_learning_rate(self, actor_learning_rate, critic_learning_rate):
         self.actor_learning_rate = actor_learning_rate
@@ -586,6 +609,19 @@ class PPO_Tanh(BaseAlgo):
             entry = f"{f'{k}:':>{pad}} {v:.4f}"
             env_log_string += f"{entry}\n"
         log_string += env_log_string
+
+        # Add metrics string
+        metrics_log_string = ""
+        if 'metrics_dict' in log_dict:
+            for k, v in log_dict['metrics_dict'].items():
+                if k == 'KL_Divergence':
+                    entry = f"{f'{k}:':>{pad}} {v:.6f}"
+                elif k == 'Gaussian_Std':
+                    entry = f"{f'{k}:':>{pad}} {v:.4f}"
+                else:
+                    entry = f"{f'{k}:':>{pad}} {v:.4f}"
+                metrics_log_string += f"{entry}\n"
+        log_string += metrics_log_string
         log_string += ep_string
         log_string += (f"""{'-' * width}\n"""
                        f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
@@ -627,6 +663,12 @@ class PPO_Tanh(BaseAlgo):
         if len(env_log_dict) > 0:
             for k, v in env_log_dict.items():
                 self.writer.add_scalar(k, v, log_dict['it'])
+
+        # Log metrics dict to tensorboard
+        if 'metrics_dict' in log_dict:
+            for metric_key, metric_value in log_dict['metrics_dict'].items():
+                self.writer.add_scalar(
+                    f'Metrics/{metric_key}', metric_value, log_dict['it'])
 
     ##########################################################################################
     # Code for Evaluation
