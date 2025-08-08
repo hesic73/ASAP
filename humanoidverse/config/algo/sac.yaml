@@ -6,7 +6,7 @@ algo:
   config:
     # SAC specific parameters
     replay_buffer_size: 1e6
-    batch_size: 1024
+    batch_size: 4096
     learning_starts: 25000
     target_update_frequency: 1
     tau: 0.005
@@ -31,7 +31,7 @@ algo:
     save_interval: 1000
     
     # Optimization safety
-    actor_max_grad_norm: 5.0
+    actor_max_grad_norm: 1.0
     critic_max_grad_norm: 1.0  # Separate clipping for critic (more aggressive)
     
     # General training config

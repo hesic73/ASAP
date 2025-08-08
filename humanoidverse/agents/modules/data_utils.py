@@ -200,7 +200,7 @@ class ReplayBuffer:
         self._pos = 0
         self._full = False
 
-    def add(self, data_dict: Dict[str, Tensor], next_obs_dict:Dict[str, Tensor]):
+    def add(self, data_dict: Dict[str, Tensor], next_obs_dict: Dict[str, Tensor]):
         for key, data in data_dict.items():
             assert key in self._buffer_dict, f"Key {key} not registered"
             expected_shape = (self.num_envs, *self._buffer_dict_shape[key])
@@ -216,7 +216,8 @@ class ReplayBuffer:
                 if is_obs:
                     assert key in next_obs_dict, f"Missing next_obs for key {key}"
                     next_data = next_obs_dict[key]
-                    expected_shape = (self.num_envs, *self._buffer_dict_shape[key])
+                    expected_shape = (
+                        self.num_envs, *self._buffer_dict_shape[key])
                     assert next_data.shape == expected_shape, (
                         f"next {key} data shape {next_data.shape} does not match buffer shape. Expected {expected_shape}"
                     )
@@ -261,3 +262,103 @@ class ReplayBuffer:
         for key, shape, is_obs in zip(self._buffer_dict.keys(), self._buffer_dict_shape.values(), self._buffer_dict_is_obs.values()):
             table.add_row([key, shape, is_obs])
         return table.get_string()
+
+
+class Normalizer(nn.Module):
+    """
+    Running normalizer using running mean/variance with counts (Welford-style combination).
+    Buffers: mean, std, count, and batch accumulators to support state_dict save/load.
+    """
+
+    def __init__(
+        self,
+        size: int,
+        init_mean=None,
+        init_std=None,
+        eps: float = 1e-2,
+        clip: float = float("inf"),
+        device: Union[str, torch.device] = "cpu",
+        count_epsilon: float = 1e-4,
+    ):
+        super().__init__()
+        device = torch.device(device)
+        self.size = int(size)
+        self.register_buffer("mean", torch.zeros(
+            self.size, dtype=torch.float32, device=device))
+        self.register_buffer("std", torch.ones(
+            self.size, dtype=torch.float32, device=device))
+        self.register_buffer("count", torch.tensor(
+            count_epsilon, dtype=torch.float32, device=device))
+
+        if init_mean is not None:
+            init_mean_t = torch.as_tensor(
+                init_mean, dtype=torch.float32, device=device).view(self.size)
+            self.mean.copy_(init_mean_t)
+        if init_std is not None:
+            init_std_t = torch.as_tensor(
+                init_std, dtype=torch.float32, device=device).view(self.size)
+            self.std.copy_(torch.clamp(init_std_t, min=eps))
+
+        # Accumulators for running stats of the next pending batch
+        self.register_buffer("_new_count", torch.zeros(
+            1, dtype=torch.float32, device=device))
+        self.register_buffer("_new_sum", torch.zeros(
+            self.size, dtype=torch.float32, device=device))
+        self.register_buffer("_new_sum_sq", torch.zeros(
+            self.size, dtype=torch.float32, device=device))
+
+        self.eps = eps
+        self.clip = clip
+
+    @torch.no_grad()
+    def record(self, x):
+        x = torch.as_tensor(x, dtype=torch.float32, device=self.mean.device)
+        x = x.view(-1, self.size)
+        self._new_count += float(x.shape[0])
+        self._new_sum += x.sum(dim=0)
+        self._new_sum_sq += (x * x).sum(dim=0)
+
+    @torch.no_grad()
+    def update(self):
+        # Apply running update using moments combination
+        if self._new_count.item() == 0:
+            return
+
+        # Ensure consistent shapes - extract scalars where needed
+        batch_count = self._new_count.item()
+        batch_mean = self._new_sum / batch_count
+        batch_mean_sq = self._new_sum_sq / batch_count
+        batch_var = torch.clamp(
+            batch_mean_sq - batch_mean * batch_mean, min=0.0)
+
+        mean = self.mean
+        var = self.std * self.std
+        count = self.count.item()
+
+        delta = batch_mean - mean
+        tot_count = count + batch_count
+        new_mean = mean + delta * (batch_count / tot_count)
+        m_a = var * count
+        m_b = batch_var * batch_count
+        M2 = m_a + m_b + delta.pow(2) * count * batch_count / tot_count
+        new_var = torch.clamp(M2 / tot_count, min=0.0)
+
+        self.mean.copy_(new_mean)
+        self.std.copy_(torch.clamp(new_var.sqrt(), min=self.eps))
+        self.count.fill_(tot_count)
+
+        # Reset accumulators
+        self._new_count.zero_()
+        self._new_sum.zero_()
+        self._new_sum_sq.zero_()
+
+    def normalize(self, x):
+        x = torch.as_tensor(x, dtype=torch.float32, device=self.mean.device)
+        z = (x - self.mean) / self.std
+        if self.clip < float("inf"):
+            z = torch.clamp(z, -self.clip, self.clip)
+        return z
+
+    def unnormalize(self, z):
+        z = torch.as_tensor(z, dtype=torch.float32, device=self.mean.device)
+        return z * self.std + self.mean
