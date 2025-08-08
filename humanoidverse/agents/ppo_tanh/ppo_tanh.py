@@ -139,7 +139,7 @@ class PPO_Tanh(BaseAlgo):
         self.storage.register_key('advantages', shape=(1,), dtype=torch.float)
         self.storage.register_key(
             'actions_log_prob', shape=(1,), dtype=torch.float)
-        self.storage.register_key('action_mean', shape=(
+        self.storage.register_key('gaussian_mean', shape=(
             self.num_act,), dtype=torch.float)
         self.storage.register_key('gaussian_sigma', shape=(
             self.num_act,), dtype=torch.float)
@@ -263,17 +263,17 @@ class PPO_Tanh(BaseAlgo):
         actions = self._actor_act_step(obs_dict)
         policy_state_dict["actions"] = actions
 
-        action_mean = self.actor.action_mean.detach()
+        gaussian_mean = self.actor.gaussian_mean.detach()
         gaussian_sigma = self.actor.gaussian_std.detach()
         actions_log_prob = self.actor.get_actions_log_prob(
             actions).detach().unsqueeze(1)
-        policy_state_dict["action_mean"] = action_mean
+        policy_state_dict["gaussian_mean"] = gaussian_mean
         policy_state_dict["gaussian_sigma"] = gaussian_sigma
         policy_state_dict["actions_log_prob"] = actions_log_prob
 
         assert len(actions.shape) == 2
         assert len(actions_log_prob.shape) == 2
-        assert len(action_mean.shape) == 2
+        assert len(gaussian_mean.shape) == 2
         assert len(gaussian_sigma.shape) == 2
 
         return policy_state_dict
@@ -456,13 +456,13 @@ class PPO_Tanh(BaseAlgo):
         advantages_batch = policy_state_dict['advantages']
         returns_batch = policy_state_dict['returns']
         old_actions_log_prob_batch = policy_state_dict['actions_log_prob']
-        old_mu_batch = policy_state_dict['action_mean']
+        old_mu_batch = policy_state_dict['gaussian_mean']
         old_sigma_batch = policy_state_dict['gaussian_sigma']
 
         self._actor_act_step(policy_state_dict)
         actions_log_prob_batch = self.actor.get_actions_log_prob(actions_batch)
         value_batch = self._critic_eval_step(policy_state_dict)
-        mu_batch = self.actor.action_mean
+        mu_batch = self.actor.gaussian_mean
         sigma_batch = self.actor.gaussian_std
         entropy_batch = self.actor.estimate_entropy()
 

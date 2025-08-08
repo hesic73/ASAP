@@ -136,17 +136,13 @@ class PPOActorTanh(nn.Module):
 
     def forward(self):
         raise NotImplementedError
-
+    
     @property
-    def action_mean(self):
-        """Return the mean of the transformed (tanh) distribution."""
+    def gaussian_mean(self):
+        """Return the mean of the base Gaussian distribution."""
         if self.distribution is None:
             return None
-        # For tanh-transformed distribution, we approximate the mean
-        # by transforming the Gaussian mean
-        gaussian_mean = self.distribution.mean
-        tanh_mean = torch.tanh(gaussian_mean)
-        return tanh_mean * self.action_scale + self.action_bias
+        return self.distribution.mean
 
     @property
     def gaussian_std(self):
