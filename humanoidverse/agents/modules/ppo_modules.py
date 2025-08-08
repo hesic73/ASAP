@@ -148,22 +148,14 @@ class PPOActorTanh(nn.Module):
         tanh_mean = torch.tanh(gaussian_mean)
         return tanh_mean * self.action_scale + self.action_bias
 
-    def estimate_action_std(self):
-        """Estimate the standard deviation of the transformed (tanh) distribution using sampling."""
-        if self.distribution is None:
-            return None
-        # For tanh-transformed distribution, we use sample-based estimation
-        # since there's no closed-form solution
-        with torch.no_grad():
-            # Sample from the base Gaussian distribution
-            samples = self.distribution.sample(
-                ())  # Use samples for estimation
-            # Apply tanh transformation and scaling
-            tanh_samples = torch.tanh(samples)
-            scaled_samples = tanh_samples * self.action_scale + self.action_bias
-            # Compute empirical standard deviation
-            empirical_std = scaled_samples.std(dim=0)
-        return empirical_std
+    @property
+    def gaussian_std(self):
+        """
+        NOTE (hsc): Used when calculating the KL divergence between the old and new policy.
+        KL divergence is invariant under parameter transformations. See https://en.wikipedia.org/wiki/Kullback%E2%80%93Leibler_divergence#Properties
+
+        """
+        return self.distribution.stddev
 
     def estimate_entropy(self):
         """Estimate the entropy of the transformed (tanh) distribution using sampling."""

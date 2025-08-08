@@ -141,7 +141,7 @@ class PPO_Tanh(BaseAlgo):
             'actions_log_prob', shape=(1,), dtype=torch.float)
         self.storage.register_key('action_mean', shape=(
             self.num_act,), dtype=torch.float)
-        self.storage.register_key('action_sigma', shape=(
+        self.storage.register_key('gaussian_sigma', shape=(
             self.num_act,), dtype=torch.float)
 
     def _get_action_scaling(self):
@@ -263,18 +263,17 @@ class PPO_Tanh(BaseAlgo):
         policy_state_dict["actions"] = actions
 
         action_mean = self.actor.action_mean.detach()
-        action_sigma = self.actor.estimate_action_std().detach()
+        gaussian_sigma = self.actor.gaussian_std.detach()
         actions_log_prob = self.actor.get_actions_log_prob(
             actions).detach().unsqueeze(1)
         policy_state_dict["action_mean"] = action_mean
-        policy_state_dict["action_sigma"] = action_sigma
+        policy_state_dict["gaussian_sigma"] = gaussian_sigma
         policy_state_dict["actions_log_prob"] = actions_log_prob
 
         assert len(actions.shape) == 2
         assert len(actions_log_prob.shape) == 2
         assert len(action_mean.shape) == 2
-        # NOTE (hsc): 这是一个breaking change，我相当于采样的时候就mean了
-        assert len(action_sigma.shape) == 1
+        assert len(gaussian_sigma.shape) == 2
 
         return policy_state_dict
 
@@ -447,21 +446,18 @@ class PPO_Tanh(BaseAlgo):
         returns_batch = policy_state_dict['returns']
         old_actions_log_prob_batch = policy_state_dict['actions_log_prob']
         old_mu_batch = policy_state_dict['action_mean']
-        old_sigma_batch = policy_state_dict['action_sigma']
+        old_sigma_batch = policy_state_dict['gaussian_sigma']
 
         self._actor_act_step(policy_state_dict)
         actions_log_prob_batch = self.actor.get_actions_log_prob(actions_batch)
         value_batch = self._critic_eval_step(policy_state_dict)
         mu_batch = self.actor.action_mean
-        sigma_batch = self.actor.estimate_action_std()
+        sigma_batch = self.actor.gaussian_std
         entropy_batch = self.actor.estimate_entropy()
 
         # KL
         if self.desired_kl != None and self.schedule == 'adaptive':
             with torch.inference_mode():
-                # TODO (hsc): 我把action_std变成了sample-based的估计。所以sigma出来的就是 (num_actions,)
-                # 不知道这里计算是否正确。有空可以检查一下。
-                # 话说，从Gaussian变成了tanh Gaussian，KL的计算方式也变了。正确的处理应该是把adaptive LR给去掉！
                 kl = torch.sum(
                     torch.log(sigma_batch / old_sigma_batch + 1.e-5) + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch)) / (2.0 * torch.square(sigma_batch)) - 0.5, axis=-1)
                 kl_mean = torch.mean(kl)
