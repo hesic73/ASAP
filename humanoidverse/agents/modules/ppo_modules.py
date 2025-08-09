@@ -136,7 +136,7 @@ class PPOActorTanh(nn.Module):
 
     def forward(self):
         raise NotImplementedError
-    
+
     @property
     def gaussian_mean(self):
         """Return the mean of the base Gaussian distribution."""
@@ -187,10 +187,15 @@ class PPOActorTanh(nn.Module):
         output = self.actor_module(actor_obs)
         mean, log_std = output.chunk(2, dim=-1)
 
-        # Clamp log_std for stability
-        log_std = torch.tanh(log_std)
-        log_std = self.LOG_STD_MIN + 0.5 * \
-            (self.LOG_STD_MAX - self.LOG_STD_MIN) * (log_std + 1)
+        # NOTE (hsc): cleanrl的实现是这样的
+        # log_std = torch.tanh(log_std)
+        # log_std = self.LOG_STD_MIN + 0.5 * \
+        #     (self.LOG_STD_MAX - self.LOG_STD_MIN) * (log_std + 1)
+
+        # stable baseline的实现是这样的
+        log_std = torch.clamp(
+            log_std, min=self.LOG_STD_MIN, max=self.LOG_STD_MAX)
+
         std = log_std.exp()
 
         self.distribution = Normal(mean, std)
@@ -217,7 +222,12 @@ class PPOActorTanh(nn.Module):
         # Get log prob in pre-tanh space
         log_prob = self.distribution.log_prob(x_t)
         # Apply tanh correction
-        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
+
+        # NOTE (hsc): 这里cleanrl和stable baseline的实现不一样。
+        # cleanrl的实现是：
+        # log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
+        # stable baseline的实现是：
+        log_prob -= torch.log(1 - y_t.pow(2) + 1e-6)
         return log_prob.sum(dim=-1)
 
     def act_inference(self, actor_obs: torch.Tensor):
