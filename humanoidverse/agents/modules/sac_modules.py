@@ -10,7 +10,7 @@ from .modules import BaseModule
 from typing import Dict, Any, Callable
 
 
-class SACActor(nn.Module):
+class SACTanhActor(nn.Module):
     def __init__(
         self,
         obs_dim_dict: Dict[str, int],

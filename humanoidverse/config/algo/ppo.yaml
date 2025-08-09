@@ -29,6 +29,10 @@ algo:
     init_at_random_ep_len: True
     eval_callbacks: null
 
+    # actor config
+    tanh_loc: False
+    up_scale: 5.0
+
     module_dict:
       actor: 
         input_dim: [actor_obs]

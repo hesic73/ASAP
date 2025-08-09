@@ -107,7 +107,9 @@ class PPO(BaseAlgo):
             obs_dim_dict=self.algo_obs_dim_dict,
             module_config_dict=self.config.module_dict.actor,
             num_actions=self.num_act,
-            init_noise_std=self.config.init_noise_std
+            init_noise_std=self.config.init_noise_std,
+            tanh_loc=self.config.tanh_loc,
+            up_scale=self.config.up_scale
         ).to(self.device)
 
         self.critic = PPOCritic(self.algo_obs_dim_dict,
@@ -167,7 +169,8 @@ class PPO(BaseAlgo):
                     self.actor_learning_rate, self.critic_learning_rate)
                 logger.info("Optimizer loaded from checkpoint")
                 logger.info(f"Actor Learning rate: {self.actor_learning_rate}")
-                logger.info(f"Critic Learning rate: {self.critic_learning_rate}")
+                logger.info(
+                    f"Critic Learning rate: {self.critic_learning_rate}")
             self.current_learning_iteration = loaded_dict["iter"]
             return loaded_dict["infos"]
 
@@ -389,7 +392,8 @@ class PPO(BaseAlgo):
             for policy_state_key in policy_state_dict.keys():
                 policy_state_dict[policy_state_key] = policy_state_dict[policy_state_key].to(
                     self.device)
-            loss_dict, batch_metrics_dict = self._update_algo_step(policy_state_dict, loss_dict)
+            loss_dict, batch_metrics_dict = self._update_algo_step(
+                policy_state_dict, loss_dict)
             # Accumulate metrics
             for key, value in batch_metrics_dict.items():
                 if key not in metrics_dict:
@@ -412,7 +416,8 @@ class PPO(BaseAlgo):
         return loss_dict
 
     def _update_algo_step(self, policy_state_dict, loss_dict):
-        loss_dict, metrics_dict = self._update_ppo(policy_state_dict, loss_dict)
+        loss_dict, metrics_dict = self._update_ppo(
+            policy_state_dict, loss_dict)
         return loss_dict, metrics_dict
 
     def _actor_act_step(self, obs_dict):
@@ -508,7 +513,7 @@ class PPO(BaseAlgo):
         action_mean_avg = torch.mean(mu_batch)
         action_std_avg = torch.mean(sigma_batch)
         entropy_avg = torch.mean(entropy_batch)
-        
+
         metrics_dict['Action_Mean'] = action_mean_avg.item()
         metrics_dict['Action_Std'] = action_std_avg.item()
         metrics_dict['Entropy'] = entropy_avg.item()

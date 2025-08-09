@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 
 from humanoidverse.agents.base_algo.base_algo import BaseAlgo
 from humanoidverse.envs.base_task.base_task import BaseTask
-from humanoidverse.agents.modules.sac_modules import SACActor, SACCritic, DoubleQCritic
+from humanoidverse.agents.modules.sac_modules import SACTanhActor, SACCritic, DoubleQCritic
 from humanoidverse.agents.modules.data_utils import ReplayBuffer, Normalizer
 from humanoidverse.agents.callbacks.base_callback import RL_EvalCallback
 from humanoidverse.utils.average_meters import TensorAverageMeterDict
@@ -109,7 +109,7 @@ class SAC(BaseAlgo):
         # Get action space bounds if available
         action_scale, action_bias = self._get_action_scaling()
 
-        self.actor = SACActor(
+        self.actor = SACTanhActor(
             obs_dim_dict=self.algo_obs_dim_dict,
             module_config_dict=self.config.module_dict.actor,
             num_actions=self.num_actions,

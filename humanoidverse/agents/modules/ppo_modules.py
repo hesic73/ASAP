@@ -12,10 +12,14 @@ from typing import Dict, Any
 
 class PPOActor(nn.Module):
     def __init__(self,
-                 obs_dim_dict,
-                 module_config_dict,
-                 num_actions,
-                 init_noise_std):
+                 obs_dim_dict: Dict[str, int],
+                 module_config_dict: Dict[str, Any],
+                 num_actions: int,
+                 init_noise_std: float,
+                 # as in torchrl
+                 tanh_loc: bool = False,
+                 up_scale: float = 5.0,
+                 ):
         super(PPOActor, self).__init__()
 
         module_config_dict = self._process_module_config(
@@ -26,6 +30,10 @@ class PPOActor(nn.Module):
         # Action noise
         self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
         self.distribution = None
+
+        self.tanh_loc = tanh_loc
+        self.up_scale = up_scale
+
         # disable args validation for speedup
         Normal.set_default_validate_args = False
 
@@ -65,6 +73,8 @@ class PPOActor(nn.Module):
 
     def update_distribution(self, actor_obs):
         mean = self.actor(actor_obs)
+        if self.tanh_loc:
+            mean = torch.tanh(mean/self.up_scale) * self.up_scale
         self.distribution = Normal(mean, mean*0. + self.std)
 
     def act(self, actor_obs, **kwargs):
@@ -76,6 +86,9 @@ class PPOActor(nn.Module):
 
     def act_inference(self, actor_obs):
         actions_mean = self.actor(actor_obs)
+        if self.tanh_loc:
+            actions_mean = torch.tanh(
+                actions_mean/self.up_scale) * self.up_scale
         return actions_mean
 
     def to_cpu(self):
@@ -96,11 +109,13 @@ class PPOActorTanh(nn.Module):
 
         # Modify config to output 2 * num_actions (mean and log_std)
         module_config_dict = self._process_module_config(
-            module_config_dict, num_actions * 2
+            module_config_dict, num_actions
         )
 
         self.actor_module = BaseModule(obs_dim_dict, module_config_dict)
         self.num_actions = num_actions
+        # NOTE (hsc): 这个实现参考博添的OmniDrones
+        self.log_std = nn.Parameter(torch.zeros(num_actions))
 
         # Log std bounds for stability (from CleanRL)
         self.LOG_STD_MAX = 2
@@ -119,12 +134,10 @@ class PPOActorTanh(nn.Module):
         # disable args validation for speedup
         Normal.set_default_validate_args = False
 
-    def _process_module_config(
-        self, module_config_dict: Dict[str, Any], output_dim: int
-    ) -> Dict[str, Any]:
-        for idx, dim in enumerate(module_config_dict["output_dim"]):
-            if dim == "robot_action_dim":
-                module_config_dict["output_dim"][idx] = output_dim
+    def _process_module_config(self, module_config_dict, num_actions):
+        for idx, output_dim in enumerate(module_config_dict['output_dim']):
+            if output_dim == 'robot_action_dim':
+                module_config_dict['output_dim'][idx] = num_actions
         return module_config_dict
 
     @property
@@ -185,7 +198,7 @@ class PPOActorTanh(nn.Module):
     def update_distribution(self, actor_obs: torch.Tensor):
         """Update internal distribution based on current observations."""
         output = self.actor_module(actor_obs)
-        mean, log_std = output.chunk(2, dim=-1)
+        mean = output
 
         # NOTE (hsc): cleanrl的实现是这样的
         # log_std = torch.tanh(log_std)
@@ -194,7 +207,7 @@ class PPOActorTanh(nn.Module):
 
         # stable baseline的实现是这样的
         log_std = torch.clamp(
-            log_std, min=self.LOG_STD_MIN, max=self.LOG_STD_MAX)
+            self.log_std, min=self.LOG_STD_MIN, max=self.LOG_STD_MAX)
 
         std = log_std.exp()
 
@@ -233,7 +246,7 @@ class PPOActorTanh(nn.Module):
     def act_inference(self, actor_obs: torch.Tensor):
         """Deterministic action for inference."""
         output = self.actor_module(actor_obs)
-        mean, _ = output.chunk(2, dim=-1)
+        mean = output
         # Use mean action with tanh and scaling
         y_t = torch.tanh(mean)
         action = y_t * self.action_scale + self.action_bias
