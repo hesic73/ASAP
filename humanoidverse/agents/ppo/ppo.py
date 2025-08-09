@@ -206,7 +206,7 @@ class PPO(BaseAlgo):
             # Otherwise, we will keep using the initial obs_dict for the whole training process
             obs_dict = self._rollout_step(obs_dict)
 
-            loss_dict = self._training_step()
+            loss_dict, metrics_dict = self._training_step()
 
             self.stop_time = time.time()
             self.learn_time = self.stop_time - self.start_time
@@ -215,6 +215,7 @@ class PPO(BaseAlgo):
             log_dict = {
                 'it': it,
                 'loss_dict': loss_dict,
+                'metrics_dict': metrics_dict,
                 'collection_time': self.collection_time,
                 'learn_time': self.learn_time,
                 'ep_infos': self.ep_infos,
@@ -378,6 +379,7 @@ class PPO(BaseAlgo):
 
     def _training_step(self):
         loss_dict = self._init_loss_dict_at_training_step()
+        metrics_dict = {}
 
         generator = self.storage.mini_batch_generator(
             self.num_mini_batches, self.num_learning_epochs)
@@ -387,13 +389,20 @@ class PPO(BaseAlgo):
             for policy_state_key in policy_state_dict.keys():
                 policy_state_dict[policy_state_key] = policy_state_dict[policy_state_key].to(
                     self.device)
-            loss_dict = self._update_algo_step(policy_state_dict, loss_dict)
+            loss_dict, batch_metrics_dict = self._update_algo_step(policy_state_dict, loss_dict)
+            # Accumulate metrics
+            for key, value in batch_metrics_dict.items():
+                if key not in metrics_dict:
+                    metrics_dict[key] = 0
+                metrics_dict[key] += value
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         for key in loss_dict.keys():
             loss_dict[key] /= num_updates
+        for key in metrics_dict.keys():
+            metrics_dict[key] /= num_updates
         self.storage.clear()
-        return loss_dict
+        return loss_dict, metrics_dict
 
     def _init_loss_dict_at_training_step(self):
         loss_dict = {}
@@ -403,8 +412,8 @@ class PPO(BaseAlgo):
         return loss_dict
 
     def _update_algo_step(self, policy_state_dict, loss_dict):
-        loss_dict = self._update_ppo(policy_state_dict, loss_dict)
-        return loss_dict
+        loss_dict, metrics_dict = self._update_ppo(policy_state_dict, loss_dict)
+        return loss_dict, metrics_dict
 
     def _actor_act_step(self, obs_dict):
         return self.actor.act(obs_dict["actor_obs"])
@@ -429,7 +438,7 @@ class PPO(BaseAlgo):
         entropy_batch = self.actor.entropy
 
         # KL
-        if self.desired_kl != None and self.schedule == 'adaptive':
+        if self.desired_kl is not None and self.schedule == 'adaptive':
             with torch.inference_mode():
                 kl = torch.sum(
                     torch.log(sigma_batch / old_sigma_batch + 1.e-5) + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch)) / (2.0 * torch.square(sigma_batch)) - 0.5, axis=-1)
@@ -488,10 +497,26 @@ class PPO(BaseAlgo):
         self.actor_optimizer.step()
         self.critic_optimizer.step()
 
+        # Create metrics dict for non-loss metrics
+        metrics_dict = {}
+
+        # Add KL divergence if available (from adaptive scheduler)
+        if self.desired_kl is not None and self.schedule == 'adaptive':
+            metrics_dict['KL_Divergence'] = kl_mean.item()
+
+        # Add action mean and std metrics
+        action_mean_avg = torch.mean(mu_batch)
+        action_std_avg = torch.mean(sigma_batch)
+        entropy_avg = torch.mean(entropy_batch)
+        
+        metrics_dict['Action_Mean'] = action_mean_avg.item()
+        metrics_dict['Action_Std'] = action_std_avg.item()
+        metrics_dict['Entropy'] = entropy_avg.item()
+
         loss_dict['Value'] += value_loss.item()
         loss_dict['Surrogate'] += surrogate_loss.item()
         loss_dict['Entropy'] += entropy_loss.item()
-        return loss_dict
+        return loss_dict, metrics_dict
 
     def set_learning_rate(self, actor_learning_rate, critic_learning_rate):
         self.actor_learning_rate = actor_learning_rate
@@ -509,7 +534,7 @@ class PPO(BaseAlgo):
         self.tot_time += log_dict['collection_time'] + log_dict['learn_time']
         iteration_time = log_dict['collection_time'] + log_dict['learn_time']
 
-        ep_string = f''
+        ep_string = ''
         if log_dict['ep_infos']:
             for key in log_dict['ep_infos'][0]:
                 infotensor = torch.tensor([], device=self.device)
@@ -562,6 +587,21 @@ class PPO(BaseAlgo):
             entry = f"{f'{k}:':>{pad}} {v:.4f}"
             env_log_string += f"{entry}\n"
         log_string += env_log_string
+
+        # Add metrics string
+        metrics_log_string = ""
+        if 'metrics_dict' in log_dict:
+            for k, v in log_dict['metrics_dict'].items():
+                if k == 'KL_Divergence':
+                    entry = f"{f'{k}:':>{pad}} {v:.6f}"
+                elif k == 'Action_Std':
+                    entry = f"{f'{k}:':>{pad}} {v:.4f}"
+                elif k == 'Action_Mean' or k == 'Entropy':
+                    entry = f"{f'{k}:':>{pad}} {v:.4f}"
+                else:
+                    entry = f"{f'{k}:':>{pad}} {v:.4f}"
+                metrics_log_string += f"{entry}\n"
+        log_string += metrics_log_string
         log_string += ep_string
         log_string += (f"""{'-' * width}\n"""
                        f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
@@ -605,6 +645,12 @@ class PPO(BaseAlgo):
         if len(env_log_dict) > 0:
             for k, v in env_log_dict.items():
                 self.writer.add_scalar(k, v, log_dict['it'])
+
+        # Log metrics dict to tensorboard
+        if 'metrics_dict' in log_dict:
+            for metric_key, metric_value in log_dict['metrics_dict'].items():
+                self.writer.add_scalar(
+                    f'Metrics/{metric_key}', metric_value, log_dict['it'])
 
     ##########################################################################################
     # Code for Evaluation

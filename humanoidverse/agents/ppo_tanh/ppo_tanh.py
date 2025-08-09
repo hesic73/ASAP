@@ -468,7 +468,7 @@ class PPO_Tanh(BaseAlgo):
 
         # KL
         kl_mean = None
-        if self.desired_kl != None and self.schedule == 'adaptive':
+        if self.desired_kl is not None and self.schedule == 'adaptive':
             with torch.inference_mode():
                 kl = torch.sum(
                     torch.log(sigma_batch / old_sigma_batch + 1.e-5) + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch)) / (2.0 * torch.square(sigma_batch)) - 0.5, axis=-1)
@@ -549,6 +549,10 @@ class PPO_Tanh(BaseAlgo):
         metrics_dict['Action_Mean'] = action_mean_avg.item()
         metrics_dict['Gaussian_Mean'] = gaussian_mean_avg.item()
 
+        # Add entropy metric
+        entropy_avg = torch.mean(entropy_batch)
+        metrics_dict['Entropy'] = entropy_avg.item()
+
         loss_dict['Value'] += value_loss.item()
         loss_dict['Surrogate'] += surrogate_loss.item()
         loss_dict['Entropy'] += entropy_loss.item()
@@ -570,7 +574,7 @@ class PPO_Tanh(BaseAlgo):
         self.tot_time += log_dict['collection_time'] + log_dict['learn_time']
         iteration_time = log_dict['collection_time'] + log_dict['learn_time']
 
-        ep_string = f''
+        ep_string = ''
         if log_dict['ep_infos']:
             for key in log_dict['ep_infos'][0]:
                 infotensor = torch.tensor([], device=self.device)
@@ -629,7 +633,7 @@ class PPO_Tanh(BaseAlgo):
                     entry = f"{f'{k}:':>{pad}} {v:.6f}"
                 elif k == 'Gaussian_Std':
                     entry = f"{f'{k}:':>{pad}} {v:.4f}"
-                elif k == 'Action_Mean' or k == 'Gaussian_Mean':
+                elif k == 'Action_Mean' or k == 'Gaussian_Mean' or k == 'Entropy':
                     entry = f"{f'{k}:':>{pad}} {v:.4f}"
                 else:
                     entry = f"{f'{k}:':>{pad}} {v:.4f}"
