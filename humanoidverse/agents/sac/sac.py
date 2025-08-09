@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 
 from humanoidverse.agents.base_algo.base_algo import BaseAlgo
 from humanoidverse.envs.base_task.base_task import BaseTask
-from humanoidverse.agents.modules.sac_modules import SACTanhActor, SACCritic, DoubleQCritic
+from humanoidverse.agents.modules.sac_modules import SACActor, SACCritic, DoubleQCritic
 from humanoidverse.agents.modules.data_utils import ReplayBuffer, Normalizer
 from humanoidverse.agents.callbacks.base_callback import RL_EvalCallback
 from humanoidverse.utils.average_meters import TensorAverageMeterDict
@@ -106,15 +106,14 @@ class SAC(BaseAlgo):
         self.episode_env_tensors = TensorAverageMeterDict()
 
     def setup(self):
-        # Get action space bounds if available
-        action_scale, action_bias = self._get_action_scaling()
-
-        self.actor = SACTanhActor(
+        self.actor = SACActor(
             obs_dim_dict=self.algo_obs_dim_dict,
             module_config_dict=self.config.module_dict.actor,
             num_actions=self.num_actions,
-            action_scale=action_scale,
-            action_bias=action_bias,
+            init_noise_std=self.config.init_noise_std,
+            fixed_std=self.config.fixed_std,
+            tanh_loc=self.config.tanh_loc,
+            up_scale=self.config.up_scale,
         ).to(self.device)
 
         def critic_factory():
@@ -236,14 +235,13 @@ class SAC(BaseAlgo):
             log_dict = {
                 'it': iteration,
                 'loss_dict': loss_dict,
-                'grad_norms': info_dict['grad_norms'],
-                'q_values': info_dict['q_values'],
                 'alpha_value': self.alpha.item() if isinstance(
                     self.alpha, torch.Tensor) else self.alpha,
                 'collection_time': info_dict['collection_time'],
                 'learn_time': info_dict['learn_time'],
                 'training_steps': info_dict['training_steps'],
                 'buffer_size': info_dict['buffer_size'],
+                'metrics_dict': info_dict['metrics_dict'],
                 'ep_infos': self.ep_infos,
                 'rewbuffer': self.rewbuffer,
                 'lenbuffer': self.lenbuffer,
@@ -347,8 +345,7 @@ class SAC(BaseAlgo):
         sample_count = 0
         loss_dict = {'Critic_Q1': [], 'Critic_Q2': [],
                      'Actor': [], 'Alpha': [], 'Actor_Entropy_Term': [], 'Actor_Q_Term': []}
-        grad_norm_dict = {'Critic_Grad_Norm': [], 'Actor_Grad_Norm': []}
-        q_values_dict = {'Mean_Q1': [], 'Mean_Q2': [], 'Mean_Target_Q': []}
+        metrics_dict = {}
 
         collection_time = 0.0
         training_time = 0.0
@@ -366,30 +363,53 @@ class SAC(BaseAlgo):
             # Perform gradient_steps updates per env step
             for _ in range(self.gradient_steps):
                 # Update critics every update
-                critic_loss_1, critic_loss_2, critic_grad_norm, mean_q1, mean_q2, mean_target_q = self._update_critics_step()
-                loss_dict['Critic_Q1'].append(critic_loss_1)
-                loss_dict['Critic_Q2'].append(critic_loss_2)
-                grad_norm_dict['Critic_Grad_Norm'].append(critic_grad_norm)
-                q_values_dict['Mean_Q1'].append(mean_q1)
-                q_values_dict['Mean_Q2'].append(mean_q2)
-                q_values_dict['Mean_Target_Q'].append(mean_target_q)
+                critic_result = self._update_critics_step()
+                loss_dict['Critic_Q1'].append(critic_result['critic_loss_1'])
+                loss_dict['Critic_Q2'].append(critic_result['critic_loss_2'])
+
+                # Add critic metrics to metrics_dict
+                if 'Critic_Grad_Norm' not in metrics_dict:
+                    metrics_dict['Critic_Grad_Norm'] = 0
+                if 'Mean_Q1' not in metrics_dict:
+                    metrics_dict['Mean_Q1'] = 0
+                if 'Mean_Q2' not in metrics_dict:
+                    metrics_dict['Mean_Q2'] = 0
+                if 'Mean_Target_Q' not in metrics_dict:
+                    metrics_dict['Mean_Target_Q'] = 0
+
+                metrics_dict['Critic_Grad_Norm'] += critic_result['critic_grad_norm']
+                metrics_dict['Mean_Q1'] += critic_result['mean_q1']
+                metrics_dict['Mean_Q2'] += critic_result['mean_q2']
+                metrics_dict['Mean_Target_Q'] += critic_result['mean_target_q']
 
                 # Update actor and alpha with policy frequency (delayed updates)
                 if self.updates % self.policy_frequency == 0:
                     # Compensate for delay by doing policy_frequency updates
                     for _ in range(self.policy_frequency):
-                        actor_loss, alpha_loss, actor_grad_norm, entropy_term, q_term = self._update_actor_and_alpha_step()
-                        loss_dict['Actor'].append(actor_loss)
-                        loss_dict['Alpha'].append(alpha_loss)
-                        grad_norm_dict['Actor_Grad_Norm'].append(
-                            actor_grad_norm)
+                        actor_result = self._update_actor_and_alpha_step()
+                        loss_dict['Actor'].append(actor_result['actor_loss'])
+                        loss_dict['Alpha'].append(actor_result['alpha_loss'])
+
                         # Log actor loss components
                         if 'Actor_Entropy_Term' not in loss_dict:
                             loss_dict['Actor_Entropy_Term'] = []
                         if 'Actor_Q_Term' not in loss_dict:
                             loss_dict['Actor_Q_Term'] = []
-                        loss_dict['Actor_Entropy_Term'].append(entropy_term)
-                        loss_dict['Actor_Q_Term'].append(q_term)
+                        loss_dict['Actor_Entropy_Term'].append(
+                            actor_result['entropy_term'])
+                        loss_dict['Actor_Q_Term'].append(
+                            actor_result['q_term'])
+
+                        # Add actor grad norm to metrics
+                        if 'Actor_Grad_Norm' not in metrics_dict:
+                            metrics_dict['Actor_Grad_Norm'] = 0
+                        metrics_dict['Actor_Grad_Norm'] += actor_result['actor_grad_norm']
+
+                        # Accumulate metrics
+                        for key, value in actor_result['metrics_dict'].items():
+                            if key not in metrics_dict:
+                                metrics_dict[key] = 0
+                            metrics_dict[key] += value
 
                 # Update target networks
                 if self.updates % self.target_update_frequency == 0:
@@ -407,29 +427,19 @@ class SAC(BaseAlgo):
             else:
                 averaged_loss_dict[key] = 0.0
 
-        # Average the gradient norms
-        averaged_grad_norm_dict = {}
-        for key, values in grad_norm_dict.items():
-            if values:
-                averaged_grad_norm_dict[key] = sum(values) / len(values)
-            else:
-                averaged_grad_norm_dict[key] = 0.0
-
-        # Average the Q values
-        averaged_q_values_dict = {}
-        for key, values in q_values_dict.items():
-            if values:
-                averaged_q_values_dict[key] = sum(values) / len(values)
-            else:
-                averaged_q_values_dict[key] = 0.0
+        # Average the metrics
+        averaged_metrics_dict = {}
+        # Use actor updates as reference
+        num_updates = max(1, len(loss_dict['Actor']))
+        for key, value in metrics_dict.items():
+            averaged_metrics_dict[key] = value / num_updates
 
         info_dict = {
             'training_steps': (num_samples // self.num_envs) * max(1, self.gradient_steps),
             'buffer_size': self.replay_buffer.size(),
             'collection_time': collection_time,
             'learn_time': training_time,
-            'grad_norms': averaged_grad_norm_dict,
-            'q_values': averaged_q_values_dict,
+            'metrics_dict': averaged_metrics_dict,
         }
 
         return obs_dict, averaged_loss_dict, info_dict
@@ -497,7 +507,17 @@ class SAC(BaseAlgo):
             mean_q2 = self.q_normalizer.unnormalize(current_q2_n).mean().item()
             mean_target_q = target_values_u.mean().item()
 
-        return critic_loss_1.item(), critic_loss_2.item(), critic_grad_norm.item(), mean_q1, mean_q2, mean_target_q
+        # Create return dict
+        result_dict = {
+            'critic_loss_1': critic_loss_1.item(),
+            'critic_loss_2': critic_loss_2.item(),
+            'critic_grad_norm': critic_grad_norm.item(),
+            'mean_q1': mean_q1,
+            'mean_q2': mean_q2,
+            'mean_target_q': mean_target_q,
+        }
+
+        return result_dict
 
     def _update_actor_and_alpha_step(self):
         """Single actor and alpha update step with Q unnormalization in actor loss."""
@@ -537,6 +557,18 @@ class SAC(BaseAlgo):
             self.actor.parameters(), self.actor_max_grad_norm)
         self.actor_optimizer.step()
 
+        # Create metrics dict for non-loss metrics
+        metrics_dict = {}
+
+        # Add action mean and std metrics
+        action_mean_avg = torch.mean(self.actor.action_mean)
+        action_std_avg = torch.mean(self.actor.action_std)
+        entropy_avg = torch.mean(self.actor.entropy)
+
+        metrics_dict['Action_Mean'] = action_mean_avg.item()
+        metrics_dict['Action_Std'] = action_std_avg.item()
+        metrics_dict['Entropy'] = entropy_avg.item()
+
         # Update alpha (temperature parameter) if autotuning
         if self.autotune_alpha:
             alpha_loss = -(
@@ -547,10 +579,26 @@ class SAC(BaseAlgo):
             alpha_loss.backward()
             self.alpha_optimizer.step()
 
-            return actor_loss.item(), alpha_loss.item(), actor_grad_norm.item(), mean_entropy_term, mean_q_term
+            result_dict = {
+                'actor_loss': actor_loss.item(),
+                'alpha_loss': alpha_loss.item(),
+                'actor_grad_norm': actor_grad_norm.item(),
+                'entropy_term': mean_entropy_term,
+                'q_term': mean_q_term,
+                'metrics_dict': metrics_dict,
+            }
         else:
             # No alpha loss when using fixed alpha
-            return actor_loss.item(), 0.0, actor_grad_norm.item(), mean_entropy_term, mean_q_term
+            result_dict = {
+                'actor_loss': actor_loss.item(),
+                'alpha_loss': 0.0,
+                'actor_grad_norm': actor_grad_norm.item(),
+                'entropy_term': mean_entropy_term,
+                'q_term': mean_q_term,
+                'metrics_dict': metrics_dict,
+            }
+
+        return result_dict
 
     @property
     def alpha(self):
@@ -777,19 +825,22 @@ class SAC(BaseAlgo):
                     loss_string += f"""{f'{loss_name} Loss:':>{pad}} {loss_value:.4f}\n"""
             log_string += loss_string
 
-        # Add gradient norm information
-        if 'grad_norms' in log_dict and log_dict['grad_norms']:
-            grad_norm_string = ""
-            for grad_name, grad_value in log_dict['grad_norms'].items():
-                grad_norm_string += f"""{f'{grad_name}:':>{pad}} {grad_value:.4f}\n"""
-            log_string += grad_norm_string
-
-        # Add Q values information
-        if 'q_values' in log_dict and log_dict['q_values']:
-            q_values_string = ""
-            for q_name, q_value in log_dict['q_values'].items():
-                q_values_string += f"""{f'{q_name}:':>{pad}} {q_value:.4f}\n"""
-            log_string += q_values_string
+        # Add metrics string
+        metrics_log_string = ""
+        if 'metrics_dict' in log_dict:
+            for k, v in log_dict['metrics_dict'].items():
+                if k == 'Action_Std':
+                    entry = f"{f'{k}:':>{pad}} {v:.4f}"
+                elif k == 'Action_Mean' or k == 'Entropy':
+                    entry = f"{f'{k}:':>{pad}} {v:.4f}"
+                elif k in ['Critic_Grad_Norm', 'Actor_Grad_Norm']:
+                    entry = f"{f'{k}:':>{pad}} {v:.4f}"
+                elif k in ['Mean_Q1', 'Mean_Q2', 'Mean_Target_Q']:
+                    entry = f"{f'{k}:':>{pad}} {v:.4f}"
+                else:
+                    entry = f"{f'{k}:':>{pad}} {v:.4f}"
+                metrics_log_string += f"{entry}\n"
+        log_string += metrics_log_string
 
         log_string += (f"""{'-' * width}\n"""
                        f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
@@ -870,18 +921,6 @@ class SAC(BaseAlgo):
             for k, v in env_log_dict.items():
                 self.writer.add_scalar(k, v, log_dict['it'])
 
-        # Gradient norm metrics
-        if 'grad_norms' in log_dict:
-            for grad_name, grad_value in log_dict['grad_norms'].items():
-                self.writer.add_scalar(
-                    f'GradNorm/{grad_name}', grad_value, log_dict['it'])
-
-        # Q values metrics
-        if 'q_values' in log_dict:
-            for q_name, q_value in log_dict['q_values'].items():
-                self.writer.add_scalar(
-                    f'QValues/{q_name}', q_value, log_dict['it'])
-
         # Actor loss components
         if 'Actor_Entropy_Term' in log_dict['loss_dict']:
             self.writer.add_scalar(
@@ -889,6 +928,12 @@ class SAC(BaseAlgo):
         if 'Actor_Q_Term' in log_dict['loss_dict']:
             self.writer.add_scalar(
                 'ActorComponents/Q_Term', log_dict['loss_dict']['Actor_Q_Term'], log_dict['it'])
+
+        # Metrics logging
+        if 'metrics_dict' in log_dict:
+            for metric_key, metric_value in log_dict['metrics_dict'].items():
+                self.writer.add_scalar(
+                    f'Metrics/{metric_key}', metric_value, log_dict['it'])
 
         if 'alpha_value' in log_dict:
             self.writer.add_scalar(

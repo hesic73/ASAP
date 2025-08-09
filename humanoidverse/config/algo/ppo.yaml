@@ -30,7 +30,7 @@ algo:
     eval_callbacks: null
 
     # actor config
-    tanh_loc: False
+    tanh_loc: True
     up_scale: 5.0
 
     module_dict:
