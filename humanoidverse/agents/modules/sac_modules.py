@@ -103,6 +103,101 @@ class SACActor(nn.Module):
         self.std.to('cpu')
 
 
+class SACLogStdActor(nn.Module):
+    def __init__(self,
+                 obs_dim_dict: Dict[str, int],
+                 module_config_dict: Dict[str, Any],
+                 num_actions: int,
+                 init_noise_std: float,
+                 # as in torchrl
+                 tanh_loc: bool = False,
+                 up_scale: float = 5.0,
+                 ):
+        super(SACLogStdActor, self).__init__()
+
+        module_config_dict = self._process_module_config(
+            module_config_dict, num_actions)
+
+        self.actor_module = BaseModule(obs_dim_dict, module_config_dict)
+
+        # Action noise
+        self.log_std = nn.Parameter(
+            torch.log(torch.tensor(init_noise_std)) * torch.ones(num_actions))
+        # Log std bounds for stability (from CleanRL)
+        self.LOG_STD_MAX = 2
+        self.LOG_STD_MIN = -5
+        self.distribution = None
+
+        self.tanh_loc = tanh_loc
+        self.up_scale = up_scale
+
+        # disable args validation for speedup
+        Normal.set_default_validate_args = False
+
+    def _process_module_config(self, module_config_dict, num_actions):
+        for idx, output_dim in enumerate(module_config_dict['output_dim']):
+            if output_dim == 'robot_action_dim':
+                module_config_dict['output_dim'][idx] = num_actions
+        return module_config_dict
+
+    @property
+    def actor(self):
+        return self.actor_module
+
+    @staticmethod
+    # not used at the moment
+    def init_weights(sequential, scales):
+        [torch.nn.init.orthogonal_(module.weight, gain=scales[idx]) for idx, module in
+         enumerate(mod for mod in sequential if isinstance(mod, nn.Linear))]
+
+    def reset(self, dones=None):
+        pass
+
+    def forward(self):
+        raise NotImplementedError
+
+    @property
+    def action_mean(self):
+        return self.distribution.mean
+
+    @property
+    def action_std(self):
+        return self.distribution.stddev
+
+    @property
+    def entropy(self):
+        return self.distribution.entropy().sum(dim=-1)
+
+    def update_distribution(self, actor_obs):
+        mean = self.actor(actor_obs)
+        if self.tanh_loc:
+            mean = torch.tanh(mean/self.up_scale) * self.up_scale
+
+        std = torch.clamp(
+            self.log_std, min=self.LOG_STD_MIN, max=self.LOG_STD_MAX).exp()
+        self.distribution = Normal(mean, std)
+
+    # NOTE (hsc): SAC 的 action 是 reparameterized 的
+    def act(self, actor_obs, **kwargs):
+        self.update_distribution(actor_obs)
+        return self.distribution.rsample()
+
+    def get_actions_log_prob(self, actions):
+        return self.distribution.log_prob(actions).sum(dim=-1)
+
+    def act_inference(self, actor_obs):
+        actions_mean = self.actor(actor_obs)
+        if self.tanh_loc:
+            actions_mean = torch.tanh(
+                actions_mean/self.up_scale) * self.up_scale
+        return actions_mean
+
+    def to_cpu(self):
+        self.actor = deepcopy(self.actor).to('cpu')
+        self.log_std.to('cpu')
+
+
+
 class SACTanhActor(nn.Module):
     def __init__(
         self,

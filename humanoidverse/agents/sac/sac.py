@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 
 from humanoidverse.agents.base_algo.base_algo import BaseAlgo
 from humanoidverse.envs.base_task.base_task import BaseTask
-from humanoidverse.agents.modules.sac_modules import SACActor, SACCritic, DoubleQCritic
+from humanoidverse.agents.modules.sac_modules import SACLogStdActor, SACCritic, DoubleQCritic
 from humanoidverse.agents.modules.data_utils import ReplayBuffer, Normalizer
 from humanoidverse.agents.callbacks.base_callback import RL_EvalCallback
 from humanoidverse.utils.average_meters import TensorAverageMeterDict
@@ -104,14 +104,16 @@ class SAC(BaseAlgo):
         self.rewbuffer = deque(maxlen=100)
         self.lenbuffer = deque(maxlen=100)
         self.episode_env_tensors = TensorAverageMeterDict()
+        
+        # Actor freezing flag
+        self.actor_frozen = False
 
     def setup(self):
-        self.actor = SACActor(
+        self.actor = SACLogStdActor(
             obs_dim_dict=self.algo_obs_dim_dict,
             module_config_dict=self.config.module_dict.actor,
             num_actions=self.num_actions,
             init_noise_std=self.config.init_noise_std,
-            fixed_std=self.config.fixed_std,
             tanh_loc=self.config.tanh_loc,
             up_scale=self.config.up_scale,
         ).to(self.device)
@@ -184,10 +186,15 @@ class SAC(BaseAlgo):
         logger.info(f"Replay buffer:\n{self.replay_buffer}")
 
         # 我看 https://sites.google.com/berkeley.edu/fine-tuning-locomotion 的实现，即使 enable Q normalization，loc/scale 也没有更新
-        init_std = torch.tensor(
-            [1.0 / max(1e-6, (1.0 - float(self.gamma)))], device=self.device)
+        if self.config.enable_q_normalization:
+            init_std = torch.tensor(
+                [1.0 / max(1e-6, (1.0 - float(self.gamma)))], device=self.device)
+        else:
+            init_std = torch.tensor(
+                [1.0], device=self.device)
         self.q_normalizer = Normalizer(size=1, device=self.device, eps=1e-2,
-                                       init_mean=torch.zeros(1, device=self.device), init_std=init_std)
+                                        init_mean=torch.zeros(1, device=self.device), init_std=init_std)
+
 
     def _get_action_scaling(self):
         qpos_limits, _, _ = self.env.simulator.get_dof_limits_properties()
@@ -266,6 +273,22 @@ class SAC(BaseAlgo):
         """Set networks to evaluation mode."""
         self.actor.eval()
         self.double_q_critic.eval()
+    
+    def freeze_actor(self):
+        """Freeze actor parameters to prevent updates during training."""
+        logger.info("Freezing actor parameters - only critic will be updated during training")
+        self.actor_frozen = True
+        # Freeze all actor parameters
+        for param in self.actor.parameters():
+            param.requires_grad = False
+    
+    def unfreeze_actor(self):
+        """Unfreeze actor parameters to resume normal training."""
+        logger.info("Unfreezing actor parameters - resuming normal actor-critic training")
+        self.actor_frozen = False
+        # Unfreeze all actor parameters
+        for param in self.actor.parameters():
+            param.requires_grad = True
 
     def _collect_experience(self, obs_dict: Dict[str, torch.Tensor]):
         """Collect one step of experience."""
@@ -383,7 +406,8 @@ class SAC(BaseAlgo):
                 metrics_dict['Mean_Target_Q'] += critic_result['mean_target_q']
 
                 # Update actor and alpha with policy frequency (delayed updates)
-                if self.updates % self.policy_frequency == 0:
+                # Skip actor updates if actor is frozen
+                if not self.actor_frozen and self.updates % self.policy_frequency == 0:
                     # Compensate for delay by doing policy_frequency updates
                     for _ in range(self.policy_frequency):
                         actor_result = self._update_actor_and_alpha_step()
@@ -621,6 +645,7 @@ class SAC(BaseAlgo):
             "total_steps": self.total_steps,
             "updates": self.updates,
             "autotune_alpha": self.autotune_alpha,
+            "actor_frozen": self.actor_frozen,
         }
 
         if self.autotune_alpha:
@@ -664,8 +689,27 @@ class SAC(BaseAlgo):
         self.current_learning_iteration = loaded_dict["iter"]
         self.total_steps = loaded_dict["total_steps"]
         self.updates = loaded_dict["updates"]
+        
+        # Load actor frozen state (backward compatible)
+        if "actor_frozen" in loaded_dict:
+            self.actor_frozen = loaded_dict["actor_frozen"]
+            if self.actor_frozen:
+                # Re-freeze actor parameters if they were frozen
+                for param in self.actor.parameters():
+                    param.requires_grad = False
+                logger.info("Actor parameters remain frozen after loading checkpoint")
+        else:
+            self.actor_frozen = False
 
         logger.info("Checkpoint loaded successfully")
+
+    def load_actor_only(self, ckpt_path: str):
+        logger.info(f"Loading actor checkpoint from {ckpt_path}")
+        loaded_dict = torch.load(ckpt_path, weights_only=True, map_location=self.device)
+        self.actor.load_state_dict(loaded_dict["actor_model_state_dict"])
+        self.actor_optimizer.load_state_dict(
+            loaded_dict["actor_optimizer_state_dict"])
+        logger.info("Actor checkpoint loaded successfully")
 
     @property
     def inference_model(self) -> Dict[str, nn.Module]:

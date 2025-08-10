@@ -30,9 +30,10 @@ algo:
 
     save_interval: 1000
 
+    enable_q_normalization: false
+
     init_noise_std: 0.2
-    fixed_std: True
-    tanh_loc: True
+    tanh_loc: False
     up_scale: 5.0
     
     # Optimization safety

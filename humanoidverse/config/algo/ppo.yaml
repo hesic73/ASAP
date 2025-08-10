@@ -30,7 +30,7 @@ algo:
     eval_callbacks: null
 
     # actor config
-    tanh_loc: True
+    tanh_loc: False
     up_scale: 5.0
 
     # Actor type selection - can be: PPOActor, PPOLogStdActor, PPOActorTanh, PPOActorFixSigma
