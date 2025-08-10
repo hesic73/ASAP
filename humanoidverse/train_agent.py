@@ -117,6 +117,9 @@ def main(config: OmegaConf):
     with open(experiment_save_dir / "config.yaml", "w") as file:
         OmegaConf.save(unresolved_conf, file)
 
+    wandb.save(str(experiment_save_dir / "config.yaml"),
+               base_path=experiment_save_dir)
+
     algo: BaseAlgo = instantiate(
         device=device, env=env, config=config.algo, log_dir=experiment_save_dir)
     algo.setup()

@@ -33,6 +33,16 @@ algo:
     tanh_loc: True
     up_scale: 5.0
 
+    # Actor type selection - can be: PPOActor, PPOLogStdActor, PPOActorTanh, PPOActorFixSigma
+    actor:
+      _target_: humanoidverse.agents.modules.ppo_modules.PPOLogStdActor
+      obs_dim_dict: ???
+      module_config_dict: ${algo.config.module_dict.actor}
+      num_actions: ${env.config.robot.actions_dim}
+      init_noise_std: ${algo.config.init_noise_std}
+      tanh_loc: ${algo.config.tanh_loc}
+      up_scale: ${algo.config.up_scale}
+
     module_dict:
       actor: 
         input_dim: [actor_obs]

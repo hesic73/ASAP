@@ -5,7 +5,7 @@ import torch.optim as optim
 from typing import Optional, List, Dict
 from itertools import count
 
-from humanoidverse.agents.modules.ppo_modules import PPOActor, PPOCritic
+from humanoidverse.agents.modules.ppo_modules import PPOCritic
 from humanoidverse.agents.modules.data_utils import RolloutStorage
 from humanoidverse.envs.base_task.base_task import BaseTask
 from humanoidverse.agents.base_algo.base_algo import BaseAlgo
@@ -103,14 +103,9 @@ class PPO(BaseAlgo):
         self._setup_storage()
 
     def _setup_models_and_optimizer(self):
-        self.actor = PPOActor(
-            obs_dim_dict=self.algo_obs_dim_dict,
-            module_config_dict=self.config.module_dict.actor,
-            num_actions=self.num_act,
-            init_noise_std=self.config.init_noise_std,
-            tanh_loc=self.config.tanh_loc,
-            up_scale=self.config.up_scale
-        ).to(self.device)
+        actor_config = self.config.actor.copy()
+        actor_config['obs_dim_dict'] = self.algo_obs_dim_dict
+        self.actor = instantiate(actor_config).to(self.device)
 
         self.critic = PPOCritic(self.algo_obs_dim_dict,
                                 self.config.module_dict.critic).to(self.device)
@@ -557,7 +552,9 @@ class PPO(BaseAlgo):
                     {value:.4f}\n"""
 
         train_log_dict = {}
-        mean_std = self.actor.std.mean()
+        # NOTE (hsc): 这个地方还是不很robust，先凑合一下吧
+        with torch.no_grad():
+            mean_std = self.actor.action_std.mean()
         fps = int(self.num_steps_per_env * self.env.num_envs /
                   (log_dict['collection_time'] + log_dict['learn_time']))
         train_log_dict['fps'] = fps
