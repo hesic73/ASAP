@@ -129,7 +129,10 @@ def main(config: OmegaConf):
     # import ipdb;    ipdb.set_trace()
     assert config.actor_checkpoint is not None, "Actor checkpoint is required"
     algo.load_actor_only(config.actor_checkpoint)
-    algo.freeze_actor()
+
+    # NOTE (hsc): freeze actor by default
+    if config.get("freeze_actor", True):
+        algo.freeze_actor()
 
     # handle saving config
     algo.learn()

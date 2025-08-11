@@ -50,7 +50,7 @@ def pre_process_config(config) -> None:
     for aux_obs_key, aux_config in _aux_obs_key_list.items():
         auxiliary_obs_dims[aux_obs_key] = 0
         for _key, _num in aux_config.items():
-            assert _key in config.env.config.obs.obs_dims.keys()
+            assert _key in config.env.config.obs.obs_dims.keys(), f"key {_key} not found in obs_dims: {config.env.config.obs.obs_dims.keys()}"
             auxiliary_obs_dims[aux_obs_key] += config.env.config.obs.obs_dims[_key] * _num
     logger.info(f"auxiliary_obs_dims: {auxiliary_obs_dims}")
     for obs_key, obs_config in _obs_key_list.items():
