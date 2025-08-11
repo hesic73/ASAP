@@ -9,8 +9,8 @@ algo:
     batch_size: 4096
     learning_starts: ${eval:'2 * ${algo.config.batch_size} * ${algo.config.gradient_steps} *8'}
     target_update_frequency: 1
-    tau: 0.005
-    gamma: 0.99
+    tau: 0.001
+    gamma: 0.95
     
     # Learning rates
     actor_learning_rate: 1e-5
@@ -22,7 +22,7 @@ algo:
     
     # Entropy regularization
     autotune_alpha: false  # Set to true for automatic alpha tuning
-    alpha: 0.05  # Fixed alpha value (used when autotune_alpha is false)
+    alpha: 0.0  # Fixed alpha value (used when autotune_alpha is false)
     target_entropy: "auto"  # Target entropy for autotuning (auto = -action_dim)
     
     # Training parameters
@@ -34,7 +34,7 @@ algo:
     save_interval: 1000
 
     init_noise_std: 0.8
-    tanh_loc: False
+    tanh_loc: false
     up_scale: 5.0
     
     # Optimization safety

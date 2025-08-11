@@ -104,7 +104,7 @@ class SAC(BaseAlgo):
         self.rewbuffer = deque(maxlen=100)
         self.lenbuffer = deque(maxlen=100)
         self.episode_env_tensors = TensorAverageMeterDict()
-        
+
         # Actor freezing flag
         self.actor_frozen = False
 
@@ -188,23 +188,26 @@ class SAC(BaseAlgo):
         # Pre-compute action bounds for action bound loss
         qpos_limits, _, _ = self.env.simulator.get_dof_limits_properties()
         qpos_limits = qpos_limits.to(self.device)  # (num_dof, 2)
-        default_dof_pos = self.env.default_dof_pos.to(self.device).squeeze(0)  # (num_dof,)
-        
+        default_dof_pos = self.env.default_dof_pos.to(
+            self.device).squeeze(0)  # (num_dof,)
+
         # Convert to action space bounds
         _action_scale = self.env.action_scale
         raw_action_limits = (
             qpos_limits - default_dof_pos.unsqueeze(-1)) / _action_scale
-        
+
         # Store action bounds
         self.a_bound_min = raw_action_limits[:, 0]  # (num_dof,)
         self.a_bound_max = raw_action_limits[:, 1]  # (num_dof,)
-        
+
         # Ensure bounds are finite
-        assert torch.all(torch.isfinite(self.a_bound_min)) and torch.all(torch.isfinite(self.a_bound_max)), "Actions must be bounded."
-        
+        assert torch.all(torch.isfinite(self.a_bound_min)) and torch.all(
+            torch.isfinite(self.a_bound_max)), "Actions must be bounded."
+
         # Action bound loss weight
         self.action_bound_loss_weight = self.config.action_bound_loss_weight
-        logger.info(f"Action bound loss weight: {self.action_bound_loss_weight}")
+        logger.info(
+            f"Action bound loss weight: {self.action_bound_loss_weight}")
 
     def _get_action_scaling(self):
         qpos_limits, _, _ = self.env.simulator.get_dof_limits_properties()
@@ -234,17 +237,20 @@ class SAC(BaseAlgo):
         # Use pre-computed action bounds
         a_bound_min = self.a_bound_min
         a_bound_max = self.a_bound_max
-        
+
         # Compute violations
-        violation_min = torch.minimum(action_mean - a_bound_min, torch.zeros_like(action_mean))
-        violation_max = torch.maximum(action_mean - a_bound_max, torch.zeros_like(action_mean))
-        
+        violation_min = torch.minimum(
+            action_mean - a_bound_min, torch.zeros_like(action_mean))
+        violation_max = torch.maximum(
+            action_mean - a_bound_max, torch.zeros_like(action_mean))
+
         # Sum squared violations
-        violation = torch.sum(torch.square(violation_min), dim=-1) + torch.sum(torch.square(violation_max), dim=-1)
-        
+        violation = torch.sum(torch.square(violation_min), dim=-1) + \
+            torch.sum(torch.square(violation_max), dim=-1)
+
         # Return mean violation loss (without weight)
         a_bound_loss = 0.5 * torch.mean(violation)
-        
+
         return a_bound_loss
 
     def learn(self):
@@ -301,18 +307,20 @@ class SAC(BaseAlgo):
         """Set networks to evaluation mode."""
         self.actor.eval()
         self.double_q_critic.eval()
-    
+
     def freeze_actor(self):
         """Freeze actor parameters to prevent updates during training."""
-        logger.info("Freezing actor parameters - only critic will be updated during training")
+        logger.info(
+            "Freezing actor parameters - only critic will be updated during training")
         self.actor_frozen = True
         # Freeze all actor parameters
         for param in self.actor.parameters():
             param.requires_grad = False
-    
+
     def unfreeze_actor(self):
         """Unfreeze actor parameters to resume normal training."""
-        logger.info("Unfreezing actor parameters - resuming normal actor-critic training")
+        logger.info(
+            "Unfreezing actor parameters - resuming normal actor-critic training")
         self.actor_frozen = False
         # Unfreeze all actor parameters
         for param in self.actor.parameters():
@@ -427,11 +435,17 @@ class SAC(BaseAlgo):
                     metrics_dict['Mean_Q2'] = 0
                 if 'Mean_Target_Q' not in metrics_dict:
                     metrics_dict['Mean_Target_Q'] = 0
+                if 'Mean_Entropy_Contribution' not in metrics_dict:
+                    metrics_dict['Mean_Entropy_Contribution'] = 0
+                if 'Mean_Log_Prob' not in metrics_dict:
+                    metrics_dict['Mean_Log_Prob'] = 0
 
                 metrics_dict['Critic_Grad_Norm'] += critic_result['critic_grad_norm']
                 metrics_dict['Mean_Q1'] += critic_result['mean_q1']
                 metrics_dict['Mean_Q2'] += critic_result['mean_q2']
                 metrics_dict['Mean_Target_Q'] += critic_result['mean_target_q']
+                metrics_dict['Mean_Entropy_Contribution'] += critic_result['mean_entropy_contribution']
+                metrics_dict['Mean_Log_Prob'] += critic_result['mean_log_prob']
 
                 # Update actor and alpha with policy frequency (delayed updates)
                 # Skip actor updates if actor is frozen
@@ -441,7 +455,8 @@ class SAC(BaseAlgo):
                         actor_result = self._update_actor_and_alpha_step()
                         loss_dict['Actor'].append(actor_result['actor_loss'])
                         loss_dict['Alpha'].append(actor_result['alpha_loss'])
-                        loss_dict['Action_Bound'].append(actor_result['action_bound_loss'])
+                        loss_dict['Action_Bound'].append(
+                            actor_result['action_bound_loss'])
 
                         # Log actor loss components
                         if 'Actor_Entropy_Term' not in loss_dict:
@@ -555,6 +570,11 @@ class SAC(BaseAlgo):
             mean_q2 = current_q2.mean().item()
             mean_target_q = target_values.mean().item()
 
+            # Log entropy contribution to target Q
+            entropy_contribution = -self.alpha * next_log_probs.unsqueeze(1)
+            mean_entropy_contribution = entropy_contribution.mean().item()
+            mean_log_prob = next_log_probs.mean().item()
+
         # Create return dict
         result_dict = {
             'critic_loss_1': critic_loss_1.item(),
@@ -563,6 +583,8 @@ class SAC(BaseAlgo):
             'mean_q1': mean_q1,
             'mean_q2': mean_q2,
             'mean_target_q': mean_target_q,
+            'mean_entropy_contribution': mean_entropy_contribution,
+            'mean_log_prob': mean_log_prob,
         }
 
         return result_dict
@@ -591,7 +613,7 @@ class SAC(BaseAlgo):
         entropy_term = self.alpha * log_probs.unsqueeze(1)
         q_term = q_min
         actor_loss = (entropy_term - q_term).mean()
-        
+
         # Add action bound loss
         action_bound_loss = self._action_bound_loss(self.actor.action_mean)
         actor_loss += action_bound_loss * self.action_bound_loss_weight
@@ -712,7 +734,7 @@ class SAC(BaseAlgo):
         self.current_learning_iteration = loaded_dict["iter"]
         self.total_steps = loaded_dict["total_steps"]
         self.updates = loaded_dict["updates"]
-        
+
         # Load actor frozen state (backward compatible)
         if "actor_frozen" in loaded_dict:
             self.actor_frozen = loaded_dict["actor_frozen"]
@@ -720,7 +742,8 @@ class SAC(BaseAlgo):
                 # Re-freeze actor parameters if they were frozen
                 for param in self.actor.parameters():
                     param.requires_grad = False
-                logger.info("Actor parameters remain frozen after loading checkpoint")
+                logger.info(
+                    "Actor parameters remain frozen after loading checkpoint")
         else:
             self.actor_frozen = False
 
@@ -728,7 +751,8 @@ class SAC(BaseAlgo):
 
     def load_actor_only(self, ckpt_path: str):
         logger.info(f"Loading actor checkpoint from {ckpt_path}")
-        loaded_dict = torch.load(ckpt_path, weights_only=True, map_location=self.device)
+        loaded_dict = torch.load(
+            ckpt_path, weights_only=True, map_location=self.device)
         self.actor.load_state_dict(loaded_dict["actor_model_state_dict"])
         self.actor_optimizer.load_state_dict(
             loaded_dict["actor_optimizer_state_dict"])
