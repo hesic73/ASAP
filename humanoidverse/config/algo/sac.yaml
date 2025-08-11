@@ -13,9 +13,9 @@ algo:
     gamma: 0.99
     
     # Learning rates
-    actor_learning_rate: 3e-5
-    critic_learning_rate: 3e-5
-    alpha_learning_rate: 3e-5
+    actor_learning_rate: 1e-5
+    critic_learning_rate: 1e-5
+    alpha_learning_rate: 1e-5
 
     # Action bound loss
     action_bound_loss_weight: 10.0
@@ -33,7 +33,7 @@ algo:
 
     save_interval: 1000
 
-    init_noise_std: 0.2
+    init_noise_std: 0.8
     tanh_loc: False
     up_scale: 5.0
     
