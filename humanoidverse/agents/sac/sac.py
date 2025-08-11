@@ -19,7 +19,7 @@ from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 from humanoidverse.agents.base_algo.base_algo import BaseAlgo
 from humanoidverse.envs.base_task.base_task import BaseTask
 from humanoidverse.agents.modules.sac_modules import SACLogStdActor, SACCritic, DoubleQCritic
-from humanoidverse.agents.modules.data_utils import ReplayBuffer, Normalizer
+from humanoidverse.agents.modules.data_utils import ReplayBuffer
 from humanoidverse.agents.callbacks.base_callback import RL_EvalCallback
 from humanoidverse.utils.average_meters import TensorAverageMeterDict
 
@@ -185,16 +185,26 @@ class SAC(BaseAlgo):
 
         logger.info(f"Replay buffer:\n{self.replay_buffer}")
 
-        # 我看 https://sites.google.com/berkeley.edu/fine-tuning-locomotion 的实现，即使 enable Q normalization，loc/scale 也没有更新
-        if self.config.enable_q_normalization:
-            init_std = torch.tensor(
-                [1.0 / max(1e-6, (1.0 - float(self.gamma)))], device=self.device)
-        else:
-            init_std = torch.tensor(
-                [1.0], device=self.device)
-        self.q_normalizer = Normalizer(size=1, device=self.device, eps=1e-2,
-                                        init_mean=torch.zeros(1, device=self.device), init_std=init_std)
-
+        # Pre-compute action bounds for action bound loss
+        qpos_limits, _, _ = self.env.simulator.get_dof_limits_properties()
+        qpos_limits = qpos_limits.to(self.device)  # (num_dof, 2)
+        default_dof_pos = self.env.default_dof_pos.to(self.device).squeeze(0)  # (num_dof,)
+        
+        # Convert to action space bounds
+        _action_scale = self.env.action_scale
+        raw_action_limits = (
+            qpos_limits - default_dof_pos.unsqueeze(-1)) / _action_scale
+        
+        # Store action bounds
+        self.a_bound_min = raw_action_limits[:, 0]  # (num_dof,)
+        self.a_bound_max = raw_action_limits[:, 1]  # (num_dof,)
+        
+        # Ensure bounds are finite
+        assert torch.all(torch.isfinite(self.a_bound_min)) and torch.all(torch.isfinite(self.a_bound_max)), "Actions must be bounded."
+        
+        # Action bound loss weight
+        self.action_bound_loss_weight = self.config.action_bound_loss_weight
+        logger.info(f"Action bound loss weight: {self.action_bound_loss_weight}")
 
     def _get_action_scaling(self):
         qpos_limits, _, _ = self.env.simulator.get_dof_limits_properties()
@@ -218,6 +228,24 @@ class SAC(BaseAlgo):
             torch.abs(raw_action_limits[:, 1]), torch.abs(raw_action_limits[:, 0]))
         action_bias = torch.zeros(self.num_actions, device='cpu')
         return action_scale, action_bias
+
+    def _action_bound_loss(self, action_mean):
+        """Compute action bound loss to prevent actions from going out of bounds."""
+        # Use pre-computed action bounds
+        a_bound_min = self.a_bound_min
+        a_bound_max = self.a_bound_max
+        
+        # Compute violations
+        violation_min = torch.minimum(action_mean - a_bound_min, torch.zeros_like(action_mean))
+        violation_max = torch.maximum(action_mean - a_bound_max, torch.zeros_like(action_mean))
+        
+        # Sum squared violations
+        violation = torch.sum(torch.square(violation_min), dim=-1) + torch.sum(torch.square(violation_max), dim=-1)
+        
+        # Return mean violation loss (without weight)
+        a_bound_loss = 0.5 * torch.mean(violation)
+        
+        return a_bound_loss
 
     def learn(self):
         obs_dict = self.env.reset_all()
@@ -367,7 +395,7 @@ class SAC(BaseAlgo):
         """Collect samples and train online (like CleanRL)."""
         sample_count = 0
         loss_dict = {'Critic_Q1': [], 'Critic_Q2': [],
-                     'Actor': [], 'Alpha': [], 'Actor_Entropy_Term': [], 'Actor_Q_Term': []}
+                     'Actor': [], 'Alpha': [], 'Actor_Entropy_Term': [], 'Actor_Q_Term': [], 'Action_Bound': []}
         metrics_dict = {}
 
         collection_time = 0.0
@@ -413,6 +441,7 @@ class SAC(BaseAlgo):
                         actor_result = self._update_actor_and_alpha_step()
                         loss_dict['Actor'].append(actor_result['actor_loss'])
                         loss_dict['Alpha'].append(actor_result['alpha_loss'])
+                        loss_dict['Action_Bound'].append(actor_result['action_bound_loss'])
 
                         # Log actor loss components
                         if 'Actor_Entropy_Term' not in loss_dict:
@@ -491,29 +520,24 @@ class SAC(BaseAlgo):
             next_actions = self.actor.act(next_obs["actor_obs"])
             next_log_probs = self.actor.get_actions_log_prob(next_actions)
 
-            # Target critics output normalized Q -> unnormalize to original scale
-            target_q1_n, target_q2_n = self.double_q_critic.target_forward(
+            # Target critics output Q values
+            target_q1, target_q2 = self.double_q_critic.target_forward(
                 next_obs["critic_obs"], next_actions
             )
-            target_q1_u = self.q_normalizer.unnormalize(target_q1_n)
-            target_q2_u = self.q_normalizer.unnormalize(target_q2_n)
-            target_q_u = torch.min(target_q1_u, target_q2_u) - \
+            target_q = torch.min(target_q1, target_q2) - \
                 self.alpha * next_log_probs.unsqueeze(1)
 
-            # Compute TD target on original scale
-            target_values_u = rewards + self.gamma * \
-                (1 - dones.float()) * target_q_u
+            # Compute TD target
+            target_values = rewards + self.gamma * \
+                (1 - dones.float()) * target_q
 
-            # Normalize target using current stats (update after optimizer step)
-            target_values_n = self.q_normalizer.normalize(target_values_u)
-
-        # Current Q values (normalized predictions)
-        current_q1_n, current_q2_n = self.double_q_critic(
+        # Current Q values
+        current_q1, current_q2 = self.double_q_critic(
             obs["critic_obs"], actions)
 
-        # Critic losses in normalized space
-        critic_loss_1 = F.mse_loss(current_q1_n, target_values_n)
-        critic_loss_2 = F.mse_loss(current_q2_n, target_values_n)
+        # Critic losses
+        critic_loss_1 = F.mse_loss(current_q1, target_values)
+        critic_loss_2 = F.mse_loss(current_q2, target_values)
 
         # Combined critic loss
         critic_loss = critic_loss_1 + critic_loss_2
@@ -527,9 +551,9 @@ class SAC(BaseAlgo):
 
         # Log Q values for monitoring (pre-update stats)
         with torch.no_grad():
-            mean_q1 = self.q_normalizer.unnormalize(current_q1_n).mean().item()
-            mean_q2 = self.q_normalizer.unnormalize(current_q2_n).mean().item()
-            mean_target_q = target_values_u.mean().item()
+            mean_q1 = current_q1.mean().item()
+            mean_q2 = current_q2.mean().item()
+            mean_target_q = target_values.mean().item()
 
         # Create return dict
         result_dict = {
@@ -559,15 +583,18 @@ class SAC(BaseAlgo):
         actions = self.actor.act(obs["actor_obs"])
         log_probs = self.actor.get_actions_log_prob(actions)
 
-        # Q values for sampled actions (critic outputs normalized Q)
-        q1_n, q2_n = self.double_q_critic(obs["critic_obs"], actions)
-        q_min_n = torch.min(q1_n, q2_n)
+        # Q values for sampled actions
+        q1, q2 = self.double_q_critic(obs["critic_obs"], actions)
+        q_min = torch.min(q1, q2)
 
-        # NOTE (hsc): 我normalize了Q，那我需不需要normalize alpha
-        alpha_scaled = self.alpha/self.q_normalizer.std
-        entropy_term = alpha_scaled * log_probs.unsqueeze(1)
-        q_term = q_min_n
+        # Actor loss components
+        entropy_term = self.alpha * log_probs.unsqueeze(1)
+        q_term = q_min
         actor_loss = (entropy_term - q_term).mean()
+        
+        # Add action bound loss
+        action_bound_loss = self._action_bound_loss(self.actor.action_mean)
+        actor_loss += action_bound_loss * self.action_bound_loss_weight
 
         # Log actor loss components for monitoring
         with torch.no_grad():
@@ -606,6 +633,7 @@ class SAC(BaseAlgo):
             result_dict = {
                 'actor_loss': actor_loss.item(),
                 'alpha_loss': alpha_loss.item(),
+                'action_bound_loss': action_bound_loss.item(),
                 'actor_grad_norm': actor_grad_norm.item(),
                 'entropy_term': mean_entropy_term,
                 'q_term': mean_q_term,
@@ -616,6 +644,7 @@ class SAC(BaseAlgo):
             result_dict = {
                 'actor_loss': actor_loss.item(),
                 'alpha_loss': 0.0,
+                'action_bound_loss': action_bound_loss.item(),
                 'actor_grad_norm': actor_grad_norm.item(),
                 'entropy_term': mean_entropy_term,
                 'q_term': mean_q_term,
@@ -640,7 +669,6 @@ class SAC(BaseAlgo):
             "double_q_critic_state_dict": self.double_q_critic.state_dict(),
             "actor_optimizer_state_dict": self.actor_optimizer.state_dict(),
             "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
-            "q_normalizer_state_dict": self.q_normalizer.state_dict(),
             "iter": self.current_learning_iteration,
             "total_steps": self.total_steps,
             "updates": self.updates,
@@ -669,11 +697,6 @@ class SAC(BaseAlgo):
         self.critic_optimizer.load_state_dict(
             loaded_dict["critic_optimizer_state_dict"]
         )
-
-        # Load q normalizer if present (backward compatible)
-        if "q_normalizer_state_dict" in loaded_dict:
-            self.q_normalizer.load_state_dict(
-                loaded_dict["q_normalizer_state_dict"])
 
         # Load alpha settings (explicit, no fallbacks)
         if loaded_dict["autotune_alpha"]:
@@ -812,14 +835,6 @@ class SAC(BaseAlgo):
         train_log_dict['fps'] = fps
         train_log_dict['replay_buffer_size'] = self.replay_buffer.size()
         train_log_dict['alpha_value'] = self.alpha.item()
-        # Q normalizer stats (mean/std are 1D)
-        try:
-            train_log_dict['q_norm_mean'] = float(
-                self.q_normalizer.mean.item())
-            train_log_dict['q_norm_std'] = float(self.q_normalizer.std.item())
-        except Exception:
-            train_log_dict['q_norm_mean'] = 0.0
-            train_log_dict['q_norm_std'] = 1.0
 
         # Environment metrics
         env_log_dict = self.episode_env_tensors.mean_and_clear()
@@ -836,17 +851,13 @@ class SAC(BaseAlgo):
                           f"""{'Computation:':>{pad}} {train_log_dict['fps']:.0f} steps/s (Collection: {log_dict['collection_time']:.3f}s, Learning {log_dict['learn_time']:.3f}s)\n"""
                           f"""{'Replay buffer size:':>{pad}} {train_log_dict['replay_buffer_size']}\n"""
                           f"""{'Alpha value:':>{pad}} {train_log_dict['alpha_value']:.4f}\n"""
-                          f"""{'Q Normalizer mean:':>{pad}} {train_log_dict['q_norm_mean']:.4f}\n"""
-                          f"""{'Q Normalizer std:':>{pad}} {train_log_dict['q_norm_std']:.4f}\n"""
                           f"""{'Mean reward:':>{pad}} {statistics.mean(log_dict['rewbuffer']):.2f}\n"""
                           f"""{'Mean episode length:':>{pad}} {statistics.mean(log_dict['lenbuffer']):.2f}\n""")
         else:
             log_string = (f"""{str_header.center(width, ' ')}\n\n"""
                           f"""{'Computation:':>{pad}} {train_log_dict['fps']:.0f} steps/s (Collection: {log_dict['collection_time']:.3f}s, Learning {log_dict['learn_time']:.3f}s)\n"""
                           f"""{'Replay buffer size:':>{pad}} {train_log_dict['replay_buffer_size']}\n"""
-                          f"""{'Alpha value:':>{pad}} {train_log_dict['alpha_value']:.4f}\n"""
-                          f"""{'Q Normalizer mean:':>{pad}} {train_log_dict['q_norm_mean']:.4f}\n"""
-                          f"""{'Q Normalizer std:':>{pad}} {train_log_dict['q_norm_std']:.4f}\n""")
+                          f"""{'Alpha value:':>{pad}} {train_log_dict['alpha_value']:.4f}\n""")
 
         # Add environment metrics
         env_log_string = ""
@@ -918,13 +929,6 @@ class SAC(BaseAlgo):
                                train_log_dict['alpha_value'], log_dict['it'])
         self.writer.add_scalar('Policy/replay_buffer_size',
                                train_log_dict['replay_buffer_size'], log_dict['it'])
-        # Q normalizer stats
-        if 'q_norm_mean' in train_log_dict:
-            self.writer.add_scalar(
-                'Policy/q_norm_mean', train_log_dict['q_norm_mean'], log_dict['it'])
-        if 'q_norm_std' in train_log_dict:
-            self.writer.add_scalar(
-                'Policy/q_norm_std', train_log_dict['q_norm_std'], log_dict['it'])
 
         # Additional alpha logging
         if self.autotune_alpha:
