@@ -10,7 +10,7 @@ algo:
     learning_starts: ${eval:'2 * ${algo.config.batch_size} * ${algo.config.gradient_steps} *8'}
     target_update_frequency: 1
     tau: 0.005
-    gamma: 0.99
+    gamma: 0.95
     
     # Critic ensemble parameters
     num_critics: 10  # Number of critics in ensemble

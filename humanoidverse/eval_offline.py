@@ -91,7 +91,7 @@ def main(override_config: OmegaConf):
         args_cli.env_spacing = config.env.config.env_spacing
         args_cli.output_dir = config.output_dir
         args_cli.headless = config.headless
-        args_cli.enable_cameras = config.enable_cameras
+        args_cli.enable_cameras = True
 
         app_launcher = AppLauncher(args_cli)
         simulation_app = app_launcher.app

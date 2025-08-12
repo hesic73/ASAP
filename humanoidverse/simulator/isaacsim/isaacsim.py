@@ -476,7 +476,7 @@ class IsaacSim(BaseSimulator):
         # call super
         super().set_headless(headless)
         if not self.headless:
-            from omni.isaac.debug_draw import _debug_draw
+            from isaacsim.util.debug_draw import _debug_draw
             self.draw = _debug_draw.acquire_debug_draw_interface()
         else:
             self.draw = None

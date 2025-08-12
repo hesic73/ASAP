@@ -12,6 +12,7 @@ def run_evaluation(
     isaacgym_obs_no_noise: bool = False,
     use_xvfb: bool = False,
     enforce_randomize_motion_start_eval: bool = False,
+    simulator: str = "isaacgym",
 ):
 
     # 1. Determine n_epochs if not provided
@@ -68,17 +69,17 @@ def run_evaluation(
     logger.info(f"Found run_name: {run_name}")
 
     # --- Create video output directories ---
-    isaacgym_video_dir = os.path.join(log_dir, "videos", "isaacgym")
+    hv_video_dir = os.path.join(log_dir, "videos", simulator)
     mujoco_video_dir = os.path.join(log_dir, "videos", "mujoco")
-    os.makedirs(isaacgym_video_dir, exist_ok=True)
+    os.makedirs(hv_video_dir, exist_ok=True)
     os.makedirs(mujoco_video_dir, exist_ok=True)
 
     # 4. Run humanoidverse/eval_offline.py
     logger.info(
         "\nRunning humanoidverse/eval_offline.py for offline evaluation...")
     checkpoint_path = os.path.join(log_dir, f"model_{n_epochs}.pt")
-    isaacgym_video_path = os.path.join(
-        isaacgym_video_dir, f"{run_name}_{n_epochs}_isaacgym.mp4")
+    hv_video_path = os.path.join(
+        hv_video_dir, f"{run_name}_{n_epochs}_{simulator}.mp4")
 
     eval_command = [
         "python", "humanoidverse/eval_offline.py",
@@ -86,8 +87,14 @@ def run_evaluation(
         "+domain_rand=NO_domain_rand",  # disable domain randomization
         "+opt=my_eval_callbacks",
         f"+checkpoint={checkpoint_path}",
-        f"algo.config.eval_callbacks.offline_rendering.config.video_filename={isaacgym_video_path}"
+        f"algo.config.eval_callbacks.offline_rendering.config.video_filename={hv_video_path}",
     ]
+
+    if simulator == "isaacsim":
+        eval_command.append("+simulator=isaacsim")
+        eval_command.append("+terrain=terrain_locomotion_plane")
+        eval_command.append("+env.config.env_spacing=5.0")
+        eval_command.append("+num_envs=1")
 
     if isaacgym_obs_no_noise:
         eval_command.append(
