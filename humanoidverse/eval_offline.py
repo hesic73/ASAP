@@ -131,7 +131,8 @@ def main(override_config: OmegaConf):
             )
     else:
         _pre_create_envs_callback = None
-    env = instantiate(config.env, device=device, _pre_create_envs_callback=_pre_create_envs_callback)
+    env = instantiate(config.env, device=device,
+                      _pre_create_envs_callback=_pre_create_envs_callback)
 
     algo: BaseAlgo = instantiate(
         config.algo, env=env, device=device, log_dir=None)

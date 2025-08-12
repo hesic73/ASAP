@@ -409,8 +409,8 @@ class SAC(BaseAlgo):
     def _collect_and_train_online(self, obs_dict: Dict[str, torch.Tensor], num_samples: int):
         """Collect samples and train online (like CleanRL)."""
         sample_count = 0
-        loss_dict = {'Critic': [], 'Actor': [], 'Alpha': [], 
-                    'Actor_Entropy_Term': [], 'Actor_Q_Term': [], 'Action_Bound': []}
+        loss_dict = {'Critic': [], 'Actor': [], 'Alpha': [],
+                     'Actor_Entropy_Term': [], 'Actor_Q_Term': [], 'Action_Bound': []}
         metrics_dict = {}
 
         collection_time = 0.0
@@ -549,17 +549,18 @@ class SAC(BaseAlgo):
                 (1 - dones.float()) * target_q
 
         # Update all critics in ensemble
-        current_q_values = self.critic(obs["critic_obs"], actions)  # Shape: (num_critics, batch_size, 1)
-        
+        # Shape: (num_critics, batch_size, 1)
+        current_q_values = self.critic(obs["critic_obs"], actions)
+
         # Compute losses for all critics
         critic_losses = []
         for i in range(self.critic.num_critics):
             critic_loss = F.mse_loss(current_q_values[i], target_values)
             critic_losses.append(critic_loss)
-        
+
         # Sum all critic losses
         total_critic_loss = sum(critic_losses)
-        
+
         # Update critics
         self.critic_optimizer.zero_grad()
         total_critic_loss.backward()
@@ -571,7 +572,7 @@ class SAC(BaseAlgo):
         with torch.no_grad():
             mean_min_q = torch.min(current_q_values, dim=0)[0].mean().item()
             mean_target_q = target_values.mean().item()
-            
+
             # Log entropy contribution to target Q
             entropy_contribution = -self.alpha * next_log_probs.unsqueeze(1)
             mean_entropy_contribution = entropy_contribution.mean().item()
@@ -606,7 +607,8 @@ class SAC(BaseAlgo):
         log_probs = self.actor.get_actions_log_prob(actions)
 
         # Get Q values from all critics and take minimum
-        q_values = self.critic(obs["critic_obs"], actions)  # Shape: (num_critics, batch_size, 1)
+        # Shape: (num_critics, batch_size, 1)
+        q_values = self.critic(obs["critic_obs"], actions)
         q_min = torch.min(q_values, dim=0)[0]  # Shape: (batch_size, 1)
 
         # Actor loss components
@@ -851,7 +853,8 @@ class SAC(BaseAlgo):
                         (infotensor, ep_info[key].to(self.device)))
                 value = torch.mean(infotensor)
                 self.writer.add_scalar('Episode/' + key, value, log_dict['it'])
-                ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
+                ep_string += f"""{f'Mean episode {key}:':>{pad}}
+                    {value:.4f}\n"""
 
         # Training metrics
         train_log_dict = {}
@@ -900,9 +903,11 @@ class SAC(BaseAlgo):
                     # Special formatting for actor components
                     component_name = loss_name.replace(
                         'Actor_', '').replace('_', ' ')
-                    loss_string += f"""{f'{component_name}:':>{pad}} {loss_value:.4f}\n"""
+                    loss_string += f"""{f'{component_name}:':>{pad}}
+                        {loss_value:.4f}\n"""
                 else:
-                    loss_string += f"""{f'{loss_name} Loss:':>{pad}} {loss_value:.4f}\n"""
+                    loss_string += f"""{f'{loss_name} Loss:':>{pad}}
+                        {loss_value:.4f}\n"""
             log_string += loss_string
 
         # Add metrics string

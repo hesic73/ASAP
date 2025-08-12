@@ -34,12 +34,11 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         self.init_done = False
         self.debug_viz = True
 
-
         self.simulator_name = config.simulator.config.name
         super().__init__(config, device, *args, **kwargs)
 
         # Cache frequently accessed config values to avoid repeated OmegaConf access in hot path
-        
+
         self.noise_to_initial_level = self.config.noise_to_initial_level
         self.init_noise_scale_root_pos = self.config.init_noise_scale.root_pos
         self.init_noise_scale_root_rot = self.config.init_noise_scale.root_rot
@@ -59,7 +58,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         self.reward_tracking_sigma_joint_vel = self.config.rewards.reward_tracking_sigma.joint_vel
         # Cache domain randomization config values
         self.ctrl_delay_step_range = self.config.domain_rand.ctrl_delay_step_range
-  
+
         self._init_motion_lib()
         self._init_motion_extend()
         self._init_tracking_config()
@@ -91,7 +90,8 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         self._motion_xy_scale = self.config.robot.motion.get("xy_scale", 1.0)
         logger.info(f"Motion xy scale: {self._motion_xy_scale}")
         self._motion_xy_scale = torch.tensor(
-            self._motion_xy_scale, device=self.device).repeat(self.num_envs)  # [num_envs]
+            # [num_envs]
+            self._motion_xy_scale, device=self.device).repeat(self.num_envs)
 
         self._resample_motion_times(torch.arange(self.num_envs))
         self.motion_dt = self._motion_lib._motion_dt
@@ -471,11 +471,11 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
 
         if self.config.get("reset_default_no_noise", False):
             return self._reset_root_states_callback_default_no_noise(env_ids)
-        
+
         motion_times = (self.episode_length_buf) * self.dt + \
             self.motion_start_times  # next frames so +1
         offset = self.env_origins
-        
+
         # Single call to expensive get_motion_state
         motion_res = self._motion_lib.get_motion_state(
             self.motion_ids, motion_times, offset=offset, xy_scale=self._motion_xy_scale)
@@ -545,9 +545,11 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
     def _reset_root_states_callback_default_no_noise(self, env_ids: torch.Tensor):
         self.simulator.robot_root_states[env_ids] = self.base_init_state
         if self.simulator_name == "isaacsim":
-            self.simulator.robot_root_states[env_ids, 3:7] = xyzw_to_wxyz(self.simulator.robot_root_states[env_ids, 3:7])
+            self.simulator.robot_root_states[env_ids, 3:7] = xyzw_to_wxyz(
+                self.simulator.robot_root_states[env_ids, 3:7])
 
-        self.simulator.robot_root_states[env_ids,:3] += self.env_origins[env_ids]
+        self.simulator.robot_root_states[env_ids,
+                                         :3] += self.env_origins[env_ids]
         self.simulator.dof_pos[env_ids] = self.default_dof_pos
         self.simulator.dof_vel[env_ids] = 0.
 

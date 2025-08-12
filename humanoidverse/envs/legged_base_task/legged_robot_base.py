@@ -209,7 +209,7 @@ class LeggedRobotBase(BaseTask):
 
         # Extract curriculum configuration to avoid deep nested access
         curriculum_config = self.config.rewards.reward_limit.reward_limits_curriculum
-        
+
         self.use_reward_limits_dof_pos_curriculum = curriculum_config.soft_dof_pos_curriculum
         self.use_reward_limits_dof_vel_curriculum = curriculum_config.soft_dof_vel_curriculum
         self.use_reward_limits_torque_curriculum = curriculum_config.soft_torque_curriculum
@@ -224,7 +224,7 @@ class LeggedRobotBase(BaseTask):
             logger.info(
                 f"Reward Limits DOF Curriculum Min Limit: {curriculum_config.soft_dof_pos_min_limit}")
             self.soft_dof_pos_curriculum_value = curriculum_config.soft_dof_pos_initial_limit
-            
+
             # Extract all dof_pos curriculum parameters
             self.soft_dof_pos_curriculum_level_down_threshold = curriculum_config.soft_dof_pos_curriculum_level_down_threshold
             self.soft_dof_pos_curriculum_level_up_threshold = curriculum_config.soft_dof_pos_curriculum_level_up_threshold
@@ -242,7 +242,7 @@ class LeggedRobotBase(BaseTask):
             logger.info(
                 f"Reward Limits DOF Vel Curriculum Min Limit: {curriculum_config.soft_dof_vel_min_limit}")
             self.soft_dof_vel_curriculum_value = curriculum_config.soft_dof_vel_initial_limit
-            
+
             # Extract all dof_vel curriculum parameters
             self.soft_dof_vel_curriculum_level_down_threshold = curriculum_config.soft_dof_vel_curriculum_level_down_threshold
             self.soft_dof_vel_curriculum_level_up_threshold = curriculum_config.soft_dof_vel_curriculum_level_up_threshold
@@ -260,7 +260,7 @@ class LeggedRobotBase(BaseTask):
             logger.info(
                 f"Reward Limits Torque Curriculum Min Limit: {curriculum_config.soft_torque_min_limit}")
             self.soft_torque_curriculum_value = curriculum_config.soft_torque_initial_limit
-            
+
             # Extract all torque curriculum parameters
             self.soft_torque_curriculum_level_down_threshold = curriculum_config.soft_torque_curriculum_level_down_threshold
             self.soft_torque_curriculum_level_up_threshold = curriculum_config.soft_torque_curriculum_level_up_threshold

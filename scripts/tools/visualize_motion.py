@@ -49,7 +49,8 @@ ASAP_JOINT_AXIS = [
 
 def main(
     motion_pkl_path: Path,
-    urdf_path: Path = Path("humanoidverse/data/robots/g1/g1_29dof_anneal_23dof.urdf"),
+    urdf_path: Path = Path(
+        "humanoidverse/data/robots/g1/g1_29dof_anneal_23dof.urdf"),
 ) -> None:
     """
     Load G1 motion data from a PKL file and visualize it using Viser.
@@ -105,7 +106,8 @@ def main(
         urdf_viser = ViserUrdf(
             server, urdf_or_path=urdf, root_node_name=f"/robot_{person_id}"
         )
-        robot_vis_handles[person_id] = {"frame": robot_frame, "urdf": urdf_viser}
+        robot_vis_handles[person_id] = {
+            "frame": robot_frame, "urdf": urdf_viser}
 
         num_frames = data["joints"].shape[0]
         if num_frames > max_timesteps:
@@ -145,15 +147,17 @@ def main(
             root_pos_t = data["root_pos"][t]
             root_quat_xyzw = data["root_quat"][t]
             root_quat_wxyz = np.array(
-                [root_quat_xyzw[3], root_quat_xyzw[0], root_quat_xyzw[1], root_quat_xyzw[2]]
+                [root_quat_xyzw[3], root_quat_xyzw[0],
+                    root_quat_xyzw[1], root_quat_xyzw[2]]
             )
 
             handles["frame"].position = root_pos_t
             handles["frame"].wxyz = root_quat_wxyz
-            
+
             # Create a dictionary mapping joint names to angles for robust update.
             joint_angles = data["joints"][t]
-            joint_cfg = {name: angle for name, angle in zip(ASAP_JOINT_ORDER, joint_angles)}
+            joint_cfg = {name: angle for name, angle in zip(
+                ASAP_JOINT_ORDER, joint_angles)}
             handles["urdf"].update_cfg(joint_cfg)
 
     @gui_timestep.on_update

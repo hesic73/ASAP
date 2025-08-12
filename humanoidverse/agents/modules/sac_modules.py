@@ -208,7 +208,6 @@ class SACLogStdActor(nn.Module):
         self.log_std.to('cpu')
 
 
-
 class SACTanhActor(nn.Module):
     def __init__(
         self,
@@ -383,7 +382,7 @@ class DoubleQCritic(torch.nn.Module):
 class REDQEnsembleCritic(torch.nn.Module):
     """Randomized Ensembles with Double Q-learning (REDQ) critic ensemble using functional approach."""
 
-    def __init__(self, critic_factory: Callable[[], nn.Module], device: torch.device, 
+    def __init__(self, critic_factory: Callable[[], nn.Module], device: torch.device,
                  num_critics: int = 10, num_sample_critics: int = 2, tau: float = 0.005):
         super().__init__()
 
@@ -394,17 +393,18 @@ class REDQEnsembleCritic(torch.nn.Module):
 
         # Create ensemble of critics for stacking
         critics = [critic_factory() for _ in range(num_critics)]
-        
+
         # Stack module states for functional approach
-        self.critic_params_raw, self.critic_buffers = stack_module_state(critics)
-        
+        self.critic_params_raw, self.critic_buffers = stack_module_state(
+            critics)
+
         # Register parameters with encoded names (replace '.' with '__')
         encoded_params = {
             encode_param_name(name): nn.Parameter(tensor.to(device))
             for name, tensor in self.critic_params_raw.items()
         }
         self.critic_param_dict = nn.ParameterDict(encoded_params)
-        
+
         # Move buffers to device
         self.critic_buffers_dict = {
             name: tensor.to(device) for name, tensor in self.critic_buffers.items()
@@ -416,7 +416,7 @@ class REDQEnsembleCritic(torch.nn.Module):
             for name, tensor in encoded_params.items()
         }
         self.target_critic_param_dict = nn.ParameterDict(target_encoded_params)
-        
+
         # Freeze target parameters
         for param in self.target_critic_param_dict.parameters():
             param.requires_grad = False
@@ -443,7 +443,7 @@ class REDQEnsembleCritic(torch.nn.Module):
         """Forward pass through all critics."""
         params = {k: v for k, v in self.critic_param_dict.items()}
         buffers = self.critic_buffers_dict
-        
+
         # Use vectorized function to compute all critic outputs
         batched_out = self._critic_func(params, buffers, obs, actions)
         return batched_out  # Shape: (num_critics, batch_size, 1)
@@ -453,30 +453,35 @@ class REDQEnsembleCritic(torch.nn.Module):
         with torch.no_grad():
             # Use target parameters (remove 'target_' prefix for decoding)
             target_params = {
-                k.replace('target_', ''): v 
+                k.replace('target_', ''): v
                 for k, v in self.target_critic_param_dict.items()
             }
             target_buffers = self.target_critic_buffers_dict
-            
+
             # Use vectorized function to compute all target critic outputs
-            batched_out = self._critic_func(target_params, target_buffers, obs, actions)
+            batched_out = self._critic_func(
+                target_params, target_buffers, obs, actions)
             return batched_out  # Shape: (num_critics, batch_size, 1)
 
     def get_min_target_q(self, obs: torch.Tensor, actions: torch.Tensor):
         """Get minimum Q-value from randomly sampled subset of target critics."""
         with torch.no_grad():
             # Get all target Q values
-            all_target_q = self.target_forward(obs, actions)  # Shape: (num_critics, batch_size, 1)
-            
+            # Shape: (num_critics, batch_size, 1)
+            all_target_q = self.target_forward(obs, actions)
+
             # Randomly sample critics for minimum computation
-            critic_indices = torch.randperm(self.num_critics, device=self.device)[:self.num_sample_critics]
-            
+            critic_indices = torch.randperm(self.num_critics, device=self.device)[
+                :self.num_sample_critics]
+
             # Select sampled critics' Q values
-            sampled_q_values = all_target_q[critic_indices]  # Shape: (num_sample_critics, batch_size, 1)
-            
+            # Shape: (num_sample_critics, batch_size, 1)
+            sampled_q_values = all_target_q[critic_indices]
+
             # Get minimum across sampled critics
-            min_q = torch.min(sampled_q_values, dim=0)[0]  # Shape: (batch_size, 1)
-            
+            min_q = torch.min(sampled_q_values, dim=0)[
+                0]  # Shape: (batch_size, 1)
+
         return min_q
 
     def soft_update_targets(self):

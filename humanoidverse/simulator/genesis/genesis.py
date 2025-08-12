@@ -272,7 +272,8 @@ class Genesis(BaseSimulator):
         self.dof_pos = self.robot.get_dofs_position(self.dof_ids)
         self.dof_vel = self.robot.get_dofs_velocity(self.dof_ids)
 
-        self.contact_forces = self.robot.get_links_net_contact_force().detach().clone().to(self.device).to(gs.tc_float)
+        self.contact_forces = self.robot.get_links_net_contact_force(
+        ).detach().clone().to(self.device).to(gs.tc_float)
 
     def refresh_sim_tensors(self):
         """
@@ -301,7 +302,8 @@ class Genesis(BaseSimulator):
         self.dof_pos = self.robot.get_dofs_position(self.dof_ids)
         self.dof_vel = self.robot.get_dofs_velocity(self.dof_ids)
 
-        self.contact_forces = self.robot.get_links_net_contact_force().detach().clone().to(self.device).to(gs.tc_float)     
+        self.contact_forces = self.robot.get_links_net_contact_force(
+        ).detach().clone().to(self.device).to(gs.tc_float)
         # import ipdb; ipdb.set_trace()
         self._rigid_body_pos = self.robot.get_links_pos(
         )[:, self.link_mapping_genesis_to_humanoidverse_idx]

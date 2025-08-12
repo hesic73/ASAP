@@ -179,11 +179,10 @@ class IsaacSim(BaseSimulator):
         if "startup" in self.event_manager.available_modes:
             self.event_manager.apply(mode="startup")
 
-
-        self.robot=self.scene.articulations["robot"]
-        self.torso_link_id, _=self.robot.find_bodies("torso_link")
-        assert len(self.torso_link_id)==1
-        self.torso_link_id=self.torso_link_id[0]
+        self.robot = self.scene.articulations["robot"]
+        self.torso_link_id, _ = self.robot.find_bodies("torso_link")
+        assert len(self.torso_link_id) == 1
+        self.torso_link_id = self.torso_link_id[0]
 
         if self.domain_rand_config.get("randomize_base_com", False):
             self._base_com_bias = torch.zeros(
@@ -191,7 +190,7 @@ class IsaacSim(BaseSimulator):
             coms = self.robot.root_physx_view.get_coms()  # (N, n_links, 7)
             torso_coms = coms[:, self.torso_link_id, :3]  # (N, 3)
             self._base_com_bias[:, :] = torso_coms
-            self._base_com_bias=self._base_com_bias.to(self.sim_device)
+            self._base_com_bias = self._base_com_bias.to(self.sim_device)
 
         if self.domain_rand_config.get("randomize_base_mass", False):
             self._base_mass_bias = torch.zeros(
@@ -199,14 +198,15 @@ class IsaacSim(BaseSimulator):
             masses = self.robot.root_physx_view.get_masses()
             torso_mass = masses[:, self.torso_link_id]
             self._base_mass_bias[:, :] = torso_mass
-            self._base_mass_bias=self._base_mass_bias.to(self.sim_device)
+            self._base_mass_bias = self._base_mass_bias.to(self.sim_device)
 
         if self.domain_rand_config.get("randomize_friction", False):
             material_properties = self.robot.root_physx_view.get_material_properties()
             self._ground_friction_values = torch.zeros(
                 self.num_envs, self.num_bodies, dtype=torch.float, device=self.sim_device, requires_grad=False)
             self._ground_friction_values[:, :] = material_properties[:, 0, :]
-            self._ground_friction_values=self._ground_friction_values.to(self.sim_device)
+            self._ground_friction_values = self._ground_friction_values.to(
+                self.sim_device)
 
         # -- event manager used for randomization
         # if self.cfg.events:

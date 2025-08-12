@@ -40,14 +40,16 @@ class OfflineRenderingCallback(RL_EvalCallback):
         self.video_filename = Path(self.config.video_filename)
         self.video_filename.parent.mkdir(parents=True, exist_ok=True)
         self.fps = int(1.0 / self.env.dt)
-        self.camera_offset = np.array(self.config.get("camera_offset", [0.8, -0.8, 0.3]))
+        self.camera_offset = np.array(
+            self.config.get("camera_offset", [0.8, -0.8, 0.3]))
         self.frames: List[np.ndarray] = []
 
         # IsaacGym specific
         self.camera_gym: Optional[Any] = None
 
         # IsaacSim specific
-        self.camera_prim_path_sim = self.config.get("camera_prim_path", "/OmniverseKit_Persp")
+        self.camera_prim_path_sim = self.config.get(
+            "camera_prim_path", "/OmniverseKit_Persp")
         self.rgb_annotator_sim = None
         self.render_product_sim = None
         self.robot_articulation_sim = None
@@ -64,16 +66,19 @@ class OfflineRenderingCallback(RL_EvalCallback):
         camera_properties = gymapi.CameraProperties()
         camera_properties.width = self.video_width
         camera_properties.height = self.video_height
-        self.camera_gym = gym.create_camera_sensor(env_handle, camera_properties)
+        self.camera_gym = gym.create_camera_sensor(
+            env_handle, camera_properties)
 
         camera_transform = gymapi.Transform()
         camera_transform.p = gymapi.Vec3(*self.camera_offset)
         camera_transform.r = gymapi.Quat.from_axis_angle(
-            gymapi.Vec3(0.0, 0.0, 1.0), np.arctan2(self.camera_offset[0], self.camera_offset[1])
+            gymapi.Vec3(0.0, 0.0, 1.0), np.arctan2(
+                self.camera_offset[0], self.camera_offset[1])
         )
 
         actor_handle = gym.get_actor_handle(env_handle, 0)
-        body_handle = gym.get_actor_rigid_body_handle(env_handle, actor_handle, 0)
+        body_handle = gym.get_actor_rigid_body_handle(
+            env_handle, actor_handle, 0)
 
         gym.attach_camera_to_body(
             self.camera_gym, env_handle, body_handle, camera_transform, gymapi.FOLLOW_POSITION
@@ -89,7 +94,8 @@ class OfflineRenderingCallback(RL_EvalCallback):
         gym.fetch_results(sim, True)
         gym.step_graphics(sim)
         gym.render_all_camera_sensors(sim)
-        img = gym.get_camera_image(sim, env_handle, self.camera_gym, gymapi.IMAGE_COLOR)
+        img = gym.get_camera_image(
+            sim, env_handle, self.camera_gym, gymapi.IMAGE_COLOR)
         img = np.reshape(img, (self.video_height, self.video_width, 4))
         self.frames.append(img[..., :3])  # Keep only RGB channels
 
@@ -104,18 +110,21 @@ class OfflineRenderingCallback(RL_EvalCallback):
         self.render_product_sim = rep.create.render_product(
             self.camera_prim_path_sim, (self.video_width, self.video_height)
         )
-        self.rgb_annotator_sim = rep.AnnotatorRegistry.get_annotator("rgb", device="cpu")
+        self.rgb_annotator_sim = rep.AnnotatorRegistry.get_annotator(
+            "rgb", device="cpu")
         self.rgb_annotator_sim.attach([self.render_product_sim])
 
     def _update_camera_and_capture_frame_isaacsim(self) -> None:
         """Updates camera position and captures a single frame for IsaacSim."""
         base_pos = self.robot_articulation_sim.data.root_pos_w[0].cpu().numpy()
         eye_pos = base_pos + self.camera_offset
-        self.sim.set_camera_view(eye=eye_pos.tolist(), target=base_pos.tolist())
+        self.sim.set_camera_view(eye=eye_pos.tolist(),
+                                 target=base_pos.tolist())
 
         self.sim.render()
         rgb_data = self.rgb_annotator_sim.get_data()
-        frame = np.frombuffer(rgb_data, dtype=np.uint8).reshape(self.video_height, self.video_width, 4)
+        frame = np.frombuffer(rgb_data, dtype=np.uint8).reshape(
+            self.video_height, self.video_width, 4)
         self.frames.append(frame[..., :3])
 
     def _setup_camera_genesis(self) -> None:
@@ -135,7 +144,8 @@ class OfflineRenderingCallback(RL_EvalCallback):
 
     def _save_video(self) -> None:
         """Saves the captured frames as a video file using imageio."""
-        logger.info(f"Saving video with {len(self.frames)} frames at {self.fps} FPS.")
+        logger.info(
+            f"Saving video with {len(self.frames)} frames at {self.fps} FPS.")
         with imageio.get_writer(self.video_filename, fps=self.fps) as writer:
             for frame in self.frames:
                 writer.append_data(frame)

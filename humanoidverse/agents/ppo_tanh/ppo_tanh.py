@@ -541,11 +541,11 @@ class PPO_Tanh(BaseAlgo):
         # Add action mean and gaussian mean metrics
         action_mean_batch = self.actor.action_mean
         gaussian_mean_batch = self.actor.gaussian_mean
-        
+
         # Compute mean across batch and action dimensions
         action_mean_avg = torch.mean(action_mean_batch)
         gaussian_mean_avg = torch.mean(gaussian_mean_batch)
-        
+
         metrics_dict['Action_Mean'] = action_mean_avg.item()
         metrics_dict['Gaussian_Mean'] = gaussian_mean_avg.item()
 
