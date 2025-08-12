@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 
 from humanoidverse.agents.base_algo.base_algo import BaseAlgo
 from humanoidverse.envs.base_task.base_task import BaseTask
-from humanoidverse.agents.modules.sac_modules import SACLogStdActor, SACCritic, DoubleQCritic
+from humanoidverse.agents.modules.sac_modules import SACLogStdActor, SACCritic, DoubleQCritic, REDQEnsembleCritic
 from humanoidverse.agents.modules.data_utils import ReplayBuffer
 from humanoidverse.agents.callbacks.base_callback import RL_EvalCallback
 from humanoidverse.utils.average_meters import TensorAverageMeterDict
@@ -60,6 +60,10 @@ class SAC(BaseAlgo):
         self.target_update_frequency = self.config.target_update_frequency
         self.tau = self.config.tau
         self.gamma = self.config.gamma
+
+        # Ensemble critic config (REDQ-style, degrades to SAC when num_critics=num_sample_critics=2)
+        self.num_critics = self.config.num_critics
+        self.num_sample_critics = self.config.num_sample_critics
 
         # Training parameters
         self.samples_per_iter = self.config.samples_per_iter
@@ -152,9 +156,12 @@ class SAC(BaseAlgo):
                 self.config.alpha, device=self.device)
             logger.info(f"Using fixed alpha value: {self.alpha_value}")
 
-        self.double_q_critic = DoubleQCritic(
+        # Initialize critic ensemble (degrades to SAC when num_critics=num_sample_critics=2)
+        self.critic = REDQEnsembleCritic(
             critic_factory=critic_factory,
             device=self.device,
+            num_critics=self.num_critics,
+            num_sample_critics=self.num_sample_critics,
             tau=self.tau,
         )
 
@@ -162,7 +169,7 @@ class SAC(BaseAlgo):
             self.actor.parameters(), lr=self.actor_learning_rate
         )
         self.critic_optimizer = optim.Adam(
-            self.double_q_critic.parameters(), lr=self.critic_learning_rate
+            self.critic.parameters(), lr=self.critic_learning_rate
         )
 
         if self.autotune_alpha:
@@ -301,12 +308,12 @@ class SAC(BaseAlgo):
     def _train_mode(self):
         """Set networks to training mode."""
         self.actor.train()
-        self.double_q_critic.train()
+        self.critic.train()
 
     def _eval_mode(self):
         """Set networks to evaluation mode."""
         self.actor.eval()
-        self.double_q_critic.eval()
+        self.critic.eval()
 
     def freeze_actor(self):
         """Freeze actor parameters to prevent updates during training."""
@@ -402,8 +409,8 @@ class SAC(BaseAlgo):
     def _collect_and_train_online(self, obs_dict: Dict[str, torch.Tensor], num_samples: int):
         """Collect samples and train online (like CleanRL)."""
         sample_count = 0
-        loss_dict = {'Critic_Q1': [], 'Critic_Q2': [],
-                     'Actor': [], 'Alpha': [], 'Actor_Entropy_Term': [], 'Actor_Q_Term': [], 'Action_Bound': []}
+        loss_dict = {'Critic': [], 'Actor': [], 'Alpha': [], 
+                    'Actor_Entropy_Term': [], 'Actor_Q_Term': [], 'Action_Bound': []}
         metrics_dict = {}
 
         collection_time = 0.0
@@ -423,16 +430,13 @@ class SAC(BaseAlgo):
             for _ in range(self.gradient_steps):
                 # Update critics every update
                 critic_result = self._update_critics_step()
-                loss_dict['Critic_Q1'].append(critic_result['critic_loss_1'])
-                loss_dict['Critic_Q2'].append(critic_result['critic_loss_2'])
+                loss_dict['Critic'].append(critic_result['critic_loss'])
 
                 # Add critic metrics to metrics_dict
                 if 'Critic_Grad_Norm' not in metrics_dict:
                     metrics_dict['Critic_Grad_Norm'] = 0
-                if 'Mean_Q1' not in metrics_dict:
-                    metrics_dict['Mean_Q1'] = 0
-                if 'Mean_Q2' not in metrics_dict:
-                    metrics_dict['Mean_Q2'] = 0
+                if 'Mean_Min_Q' not in metrics_dict:
+                    metrics_dict['Mean_Min_Q'] = 0
                 if 'Mean_Target_Q' not in metrics_dict:
                     metrics_dict['Mean_Target_Q'] = 0
                 if 'Mean_Entropy_Contribution' not in metrics_dict:
@@ -441,8 +445,7 @@ class SAC(BaseAlgo):
                     metrics_dict['Mean_Log_Prob'] = 0
 
                 metrics_dict['Critic_Grad_Norm'] += critic_result['critic_grad_norm']
-                metrics_dict['Mean_Q1'] += critic_result['mean_q1']
-                metrics_dict['Mean_Q2'] += critic_result['mean_q2']
+                metrics_dict['Mean_Min_Q'] += critic_result['mean_min_q']
                 metrics_dict['Mean_Target_Q'] += critic_result['mean_target_q']
                 metrics_dict['Mean_Entropy_Contribution'] += critic_result['mean_entropy_contribution']
                 metrics_dict['Mean_Log_Prob'] += critic_result['mean_log_prob']
@@ -481,7 +484,7 @@ class SAC(BaseAlgo):
 
                 # Update target networks
                 if self.updates % self.target_update_frequency == 0:
-                    self.double_q_critic.soft_update_targets()
+                    self.critic.soft_update_targets()
 
                 self.updates += 1
 
@@ -513,7 +516,7 @@ class SAC(BaseAlgo):
         return obs_dict, averaged_loss_dict, info_dict
 
     def _update_critics_step(self):
-        """Single critic update step with running Q normalization."""
+        """Single critic update step using ensemble (degrades to SAC when num_critics=num_sample_critics=2)."""
         # Sample batch from replay buffer
         current_samples, next_obs_samples = self.replay_buffer.sample(
             self.batch_size)
@@ -535,41 +538,40 @@ class SAC(BaseAlgo):
             next_actions = self.actor.act(next_obs["actor_obs"])
             next_log_probs = self.actor.get_actions_log_prob(next_actions)
 
-            # Target critics output Q values
-            target_q1, target_q2 = self.double_q_critic.target_forward(
+            # Use minimum Q from random subset of target critics
+            target_q_min = self.critic.get_min_target_q(
                 next_obs["critic_obs"], next_actions
             )
-            target_q = torch.min(target_q1, target_q2) - \
-                self.alpha * next_log_probs.unsqueeze(1)
+            target_q = target_q_min - self.alpha * next_log_probs.unsqueeze(1)
 
             # Compute TD target
             target_values = rewards + self.gamma * \
                 (1 - dones.float()) * target_q
 
-        # Current Q values
-        current_q1, current_q2 = self.double_q_critic(
-            obs["critic_obs"], actions)
-
-        # Critic losses
-        critic_loss_1 = F.mse_loss(current_q1, target_values)
-        critic_loss_2 = F.mse_loss(current_q2, target_values)
-
-        # Combined critic loss
-        critic_loss = critic_loss_1 + critic_loss_2
-
+        # Update all critics in ensemble
+        current_q_values = self.critic(obs["critic_obs"], actions)  # Shape: (num_critics, batch_size, 1)
+        
+        # Compute losses for all critics
+        critic_losses = []
+        for i in range(self.critic.num_critics):
+            critic_loss = F.mse_loss(current_q_values[i], target_values)
+            critic_losses.append(critic_loss)
+        
+        # Sum all critic losses
+        total_critic_loss = sum(critic_losses)
+        
         # Update critics
         self.critic_optimizer.zero_grad()
-        critic_loss.backward()
+        total_critic_loss.backward()
         critic_grad_norm = torch.nn.utils.clip_grad_norm_(
-            self.double_q_critic.parameters(), self.critic_max_grad_norm)
+            self.critic.parameters(), self.critic_max_grad_norm)
         self.critic_optimizer.step()
 
-        # Log Q values for monitoring (pre-update stats)
+        # Log Q values for monitoring
         with torch.no_grad():
-            mean_q1 = current_q1.mean().item()
-            mean_q2 = current_q2.mean().item()
+            mean_min_q = torch.min(current_q_values, dim=0)[0].mean().item()
             mean_target_q = target_values.mean().item()
-
+            
             # Log entropy contribution to target Q
             entropy_contribution = -self.alpha * next_log_probs.unsqueeze(1)
             mean_entropy_contribution = entropy_contribution.mean().item()
@@ -577,11 +579,9 @@ class SAC(BaseAlgo):
 
         # Create return dict
         result_dict = {
-            'critic_loss_1': critic_loss_1.item(),
-            'critic_loss_2': critic_loss_2.item(),
+            'critic_loss': total_critic_loss.item(),
             'critic_grad_norm': critic_grad_norm.item(),
-            'mean_q1': mean_q1,
-            'mean_q2': mean_q2,
+            'mean_min_q': mean_min_q,
             'mean_target_q': mean_target_q,
             'mean_entropy_contribution': mean_entropy_contribution,
             'mean_log_prob': mean_log_prob,
@@ -590,7 +590,7 @@ class SAC(BaseAlgo):
         return result_dict
 
     def _update_actor_and_alpha_step(self):
-        """Single actor and alpha update step with Q unnormalization in actor loss."""
+        """Single actor and alpha update step using ensemble critic."""
         # Sample batch from replay buffer
         current_samples, _ = self.replay_buffer.sample(self.batch_size)
 
@@ -605,9 +605,9 @@ class SAC(BaseAlgo):
         actions = self.actor.act(obs["actor_obs"])
         log_probs = self.actor.get_actions_log_prob(actions)
 
-        # Q values for sampled actions
-        q1, q2 = self.double_q_critic(obs["critic_obs"], actions)
-        q_min = torch.min(q1, q2)
+        # Get Q values from all critics and take minimum
+        q_values = self.critic(obs["critic_obs"], actions)  # Shape: (num_critics, batch_size, 1)
+        q_min = torch.min(q_values, dim=0)[0]  # Shape: (batch_size, 1)
 
         # Actor loss components
         entropy_term = self.alpha * log_probs.unsqueeze(1)
@@ -688,7 +688,7 @@ class SAC(BaseAlgo):
         logger.info(f"Saving checkpoint to {path}")
         save_dict = {
             "actor_model_state_dict": self.actor.state_dict(),
-            "double_q_critic_state_dict": self.double_q_critic.state_dict(),
+            "critic_state_dict": self.critic.state_dict(),
             "actor_optimizer_state_dict": self.actor_optimizer.state_dict(),
             "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
             "iter": self.current_learning_iteration,
@@ -696,6 +696,8 @@ class SAC(BaseAlgo):
             "updates": self.updates,
             "autotune_alpha": self.autotune_alpha,
             "actor_frozen": self.actor_frozen,
+            "num_critics": self.num_critics,
+            "num_sample_critics": self.num_sample_critics,
         }
 
         if self.autotune_alpha:
@@ -711,8 +713,7 @@ class SAC(BaseAlgo):
         loaded_dict = torch.load(ckpt_path, map_location=self.device)
 
         self.actor.load_state_dict(loaded_dict["actor_model_state_dict"])
-        self.double_q_critic.load_state_dict(
-            loaded_dict["double_q_critic_state_dict"])
+        self.critic.load_state_dict(loaded_dict["critic_state_dict"])
 
         self.actor_optimizer.load_state_dict(
             loaded_dict["actor_optimizer_state_dict"])
@@ -720,7 +721,7 @@ class SAC(BaseAlgo):
             loaded_dict["critic_optimizer_state_dict"]
         )
 
-        # Load alpha settings (explicit, no fallbacks)
+        # Load alpha settings
         if loaded_dict["autotune_alpha"]:
             with torch.no_grad():
                 self.log_alpha.data.copy_(
@@ -735,7 +736,7 @@ class SAC(BaseAlgo):
         self.total_steps = loaded_dict["total_steps"]
         self.updates = loaded_dict["updates"]
 
-        # Load actor frozen state (backward compatible)
+        # Load actor frozen state
         if "actor_frozen" in loaded_dict:
             self.actor_frozen = loaded_dict["actor_frozen"]
             if self.actor_frozen:
@@ -763,7 +764,7 @@ class SAC(BaseAlgo):
         """Return models for inference."""
         return {
             "actor": self.actor,
-            "double_q_critic": self.double_q_critic,
+            "critic": self.critic,
         }
 
     # --- Evaluation ---
@@ -914,7 +915,7 @@ class SAC(BaseAlgo):
                     entry = f"{f'{k}:':>{pad}} {v:.4f}"
                 elif k in ['Critic_Grad_Norm', 'Actor_Grad_Norm']:
                     entry = f"{f'{k}:':>{pad}} {v:.4f}"
-                elif k in ['Mean_Q1', 'Mean_Q2', 'Mean_Target_Q']:
+                elif k in ['Mean_Q1', 'Mean_Q2', 'Mean_Target_Q', 'Mean_Min_Q']:
                     entry = f"{f'{k}:':>{pad}} {v:.4f}"
                 else:
                     entry = f"{f'{k}:':>{pad}} {v:.4f}"

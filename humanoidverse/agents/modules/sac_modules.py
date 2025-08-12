@@ -4,10 +4,21 @@ from copy import deepcopy
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
+from torch.func import vmap, functional_call, stack_module_state
 
 from .modules import BaseModule
 
 from typing import Dict, Any, Callable
+
+
+def encode_param_name(name: str) -> str:
+    """Encode parameter name by replacing '.' with '__' for nn.ParameterDict compatibility."""
+    return name.replace('.', '__')
+
+
+def decode_param_name(name: str) -> str:
+    """Decode parameter name by replacing '__' with '.' for functional_call compatibility."""
+    return name.replace('__', '.')
 
 
 class SACActor(nn.Module):
@@ -309,11 +320,14 @@ class SACCritic(nn.Module):
     def critic(self):
         return self.critic_module
 
-    def evaluate(self, critic_obs, actions, **kwargs):
+    def evaluate(self, critic_obs: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
         # Concatenate observations and actions
         critic_input = torch.cat([critic_obs, actions], dim=-1)
         value = self.critic(critic_input)
         return value
+
+    def forward(self, critic_obs: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+        return self.evaluate(critic_obs, actions)
 
 
 class DoubleQCritic(torch.nn.Module):
@@ -364,3 +378,113 @@ class DoubleQCritic(torch.nn.Module):
         ):
             target_param.data.copy_(
                 self.tau * param.data + (1 - self.tau) * target_param.data)
+
+
+class REDQEnsembleCritic(torch.nn.Module):
+    """Randomized Ensembles with Double Q-learning (REDQ) critic ensemble using functional approach."""
+
+    def __init__(self, critic_factory: Callable[[], nn.Module], device: torch.device, 
+                 num_critics: int = 10, num_sample_critics: int = 2, tau: float = 0.005):
+        super().__init__()
+
+        self.num_critics = num_critics
+        self.num_sample_critics = num_sample_critics
+        self.tau = tau
+        self.device = device
+
+        # Create ensemble of critics for stacking
+        critics = [critic_factory() for _ in range(num_critics)]
+        
+        # Stack module states for functional approach
+        self.critic_params_raw, self.critic_buffers = stack_module_state(critics)
+        
+        # Register parameters with encoded names (replace '.' with '__')
+        encoded_params = {
+            encode_param_name(name): nn.Parameter(tensor.to(device))
+            for name, tensor in self.critic_params_raw.items()
+        }
+        self.critic_param_dict = nn.ParameterDict(encoded_params)
+        
+        # Move buffers to device
+        self.critic_buffers_dict = {
+            name: tensor.to(device) for name, tensor in self.critic_buffers.items()
+        }
+
+        # Create target parameters as copies
+        target_encoded_params = {
+            f"target_{name}": nn.Parameter(tensor.clone().detach())
+            for name, tensor in encoded_params.items()
+        }
+        self.target_critic_param_dict = nn.ParameterDict(target_encoded_params)
+        
+        # Freeze target parameters
+        for param in self.target_critic_param_dict.parameters():
+            param.requires_grad = False
+
+        # Create target buffers as copies
+        self.target_critic_buffers_dict = {
+            name: tensor.clone().detach() for name, tensor in self.critic_buffers_dict.items()
+        }
+
+        # Store reference critic for functional calls
+        self._reference_critic = critics[0]
+
+        # Define vectorized critic function
+        def critic_wrapper(params, buffers, obs, actions):
+            # Decode parameter names back to original format
+            decoded_params = {
+                decode_param_name(k): v for k, v in params.items()
+            }
+            return functional_call(self._reference_critic, (decoded_params, buffers), (obs, actions))
+
+        self._critic_func = vmap(critic_wrapper, in_dims=(0, 0, None, None))
+
+    def forward(self, obs: torch.Tensor, actions: torch.Tensor):
+        """Forward pass through all critics."""
+        params = {k: v for k, v in self.critic_param_dict.items()}
+        buffers = self.critic_buffers_dict
+        
+        # Use vectorized function to compute all critic outputs
+        batched_out = self._critic_func(params, buffers, obs, actions)
+        return batched_out  # Shape: (num_critics, batch_size, 1)
+
+    def target_forward(self, obs: torch.Tensor, actions: torch.Tensor):
+        """Forward pass through target critics."""
+        with torch.no_grad():
+            # Use target parameters (remove 'target_' prefix for decoding)
+            target_params = {
+                k.replace('target_', ''): v 
+                for k, v in self.target_critic_param_dict.items()
+            }
+            target_buffers = self.target_critic_buffers_dict
+            
+            # Use vectorized function to compute all target critic outputs
+            batched_out = self._critic_func(target_params, target_buffers, obs, actions)
+            return batched_out  # Shape: (num_critics, batch_size, 1)
+
+    def get_min_target_q(self, obs: torch.Tensor, actions: torch.Tensor):
+        """Get minimum Q-value from randomly sampled subset of target critics."""
+        with torch.no_grad():
+            # Get all target Q values
+            all_target_q = self.target_forward(obs, actions)  # Shape: (num_critics, batch_size, 1)
+            
+            # Randomly sample critics for minimum computation
+            critic_indices = torch.randperm(self.num_critics, device=self.device)[:self.num_sample_critics]
+            
+            # Select sampled critics' Q values
+            sampled_q_values = all_target_q[critic_indices]  # Shape: (num_sample_critics, batch_size, 1)
+            
+            # Get minimum across sampled critics
+            min_q = torch.min(sampled_q_values, dim=0)[0]  # Shape: (batch_size, 1)
+            
+        return min_q
+
+    def soft_update_targets(self):
+        """Soft update of all target networks."""
+        with torch.no_grad():
+            for name, param in self.critic_param_dict.items():
+                target_name = f"target_{name}"
+                target_param = self.target_critic_param_dict[target_name]
+                target_param.data.copy_(
+                    self.tau * param.data + (1 - self.tau) * target_param.data
+                )
