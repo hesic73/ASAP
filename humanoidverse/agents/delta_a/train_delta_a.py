@@ -62,10 +62,7 @@ class PPODeltaA(PPO):
             policy_config.algo, env=env, device=device, log_dir=None)
         self.loaded_policy.algo_obs_dim_dict = policy_config.env.config.robot.algo_obs_dim_dict
         self.loaded_policy.setup()
-        # import ipdb; ipdb.set_trace()
-        # for name, param in self.loaded_policy.actor.actor_module.module.named_parameters():
-        #     if name == '6.bias':
-        #         print(f"Parameter name: {name}, Parameter:  {param}")
+
         self.loaded_policy.load(config.policy_checkpoint)
 
         # import ipdb; ipdb.set_trace()
@@ -77,18 +74,6 @@ class PPODeltaA(PPO):
 
         # import ipdb; ipdb.set_trace()
         self.loaded_policy.eval_policy = self.loaded_policy._get_inference_policy()
-
-        # ----------------- UNCOMMENT THIS FOR ANALYTIC SEARCH FOR OPTIMAL ACTION BASED ON DELTA_A -----------------
-        # if not hasattr(env, 'loaded_extra_policy'):
-        #     setattr(env, 'loaded_extra_policy', self.loaded_policy)
-        # if not hasattr(env.loaded_extra_policy, 'eval_policy'):
-        #     setattr(env.loaded_extra_policy, 'eval_policy', self.loaded_policy._get_inference_policy())
-
-        # ----------------- UNCOMMENT THIS FOR ANALYTIC SEARCH FOR OPTIMAL ACTION BASED ON DELTA_A -----------------
-
-    # def _actor_act_step(self, obs_dict):
-    #     actions = self.actor.act(obs_dict["actor_obs"])
-    #     return self.actor.act_inference(obs_dict["actor_obs"])
 
     def _rollout_step(self, obs_dict):
         # import ipdb; ipdb.set_trace()
@@ -119,11 +104,6 @@ class PPODeltaA(PPO):
                 policy_output = self.loaded_policy.eval_policy(
                     obs_dict['closed_loop_actor_obs']).detach()
                 actor_state["actions_closed_loop"] = policy_output
-
-                # print('rollout_step actor_obs: ', obs_dict['actor_obs'])
-                # print('rollout_step closed_loop_actor_obs: ', obs_dict['closed_loop_actor_obs'])
-                # print('rollout_step actions: ', actions)
-                # print('rollout_step closed_loop_actions: ', actor_state['actions_closed_loop'])
 
                 ######################################################
 
@@ -184,8 +164,6 @@ class PPODeltaA(PPO):
 
         actor_state.update(
             {"actions": actions, "actions_closed_loop": actions_closed_loop})
-        # actor_state.update({"actions": actions, "actions_closed_loop": actions_closed_loop, "current_closed_loop_actor_obs": actor_state['obs']['closed_loop_actor_obs']})
-        # print("updated closed loop actor obs: ", actor_state['current_closed_loop_actor_obs'])
         for c in self.eval_callbacks:
             actor_state = c.on_pre_eval_env_step(actor_state)
         return actor_state
