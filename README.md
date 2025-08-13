@@ -440,7 +440,7 @@ If you want to visualize the motion, you can run
 ```bash
 python scripts/vis/vis_q_mj.py +robot=g1/g1_29dof_anneal_23dof +visualize_motion_file="humanoidverse/data/motions/g1_29dof_anneal_23dof/TairanTestbed/singles/0-motions_raw_tairantestbed_smpl_video_side_jump_level4_filter_amass.pkl"
 ```
-You shouold have
+You should have
 
 <img src="imgs/g1_29dof_anneal_23dof_motion.gif" width="400px"/>
 
@@ -514,6 +514,7 @@ python rl_policy/deepmimic_dec_loco_height.py --config=config/g1_29dof_hist.yaml
 
 - click to the policy terminal and press `]` to activate the locomotion policy
 - click to the policy terminal and press `[` to activate the asap policy (phase-based motion tracking policy)
+- click to the policy terminal and press `;` to switch to the asap policy 
 - press `i` to make the robot the initial position
 - press `o` to emergence stop the robot
 - press `9` in mujoco viewer to release the robostack
@@ -563,6 +564,7 @@ python rl_policy/deepmimic_dec_loco_height.py --config=config/g1_29dof_hist.yaml
 
 - click to the policy terminal and press `]` to activate the locomotion policy
 - click to the policy terminal and press `[` to activate the asap policy (phase-based motion tracking policy)
+- click to the policy terminal and press `;` to switch to the asap policy 
 - press `i` to make the robot the initial position
 - press `o` to emergence stop the robot
 - press `9` in mujoco viewer to release the robostack
