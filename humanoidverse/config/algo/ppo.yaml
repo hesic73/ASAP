@@ -35,7 +35,7 @@ algo:
 
     # Actor type selection - can be: PPOActor, PPOLogStdActor, PPOActorTanh, PPOActorFixSigma
     actor:
-      _target_: humanoidverse.agents.modules.ppo_modules.PPOLogStdActor
+      _target_: humanoidverse.agents.modules.ppo_modules.PPOActor
       obs_dim_dict: ???
       module_config_dict: ${algo.config.module_dict.actor}
       num_actions: ${env.config.robot.actions_dim}
