@@ -4,8 +4,9 @@ import torch
 from torch import nn
 import numpy as np
 import random
+from omegaconf import DictConfig
 
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Optional, Union
 from termcolor import colored
 from loguru import logger
 
@@ -38,12 +39,18 @@ def pre_process_config(config) -> None:
     _obs_key_list = config.env.config.obs.obs_dict
     _aux_obs_key_list = config.env.config.obs.obs_auxiliary
 
-    assert set(config.env.config.obs.noise_scales.keys()) == set(
-        config.env.config.obs.obs_scales.keys())
+    if isinstance(config.env.config.obs.noise_scales, dict):
+        assert set(config.env.config.obs.noise_scales.keys()) == set(
+            config.env.config.obs.obs_scales.keys())
 
     # convert obs_dims to list of dicts
-    each_dict_obs_dims = {
-        k: v for d in config.env.config.obs.obs_dims for k, v in d.items()}
+
+    # NOTE (hsc): 这里比较dirty，根本原因是我的配置不知为何结构被更改了
+    if isinstance(config.env.config.obs.obs_dims, DictConfig):
+        each_dict_obs_dims = config.env.config.obs.obs_dims
+    else:
+        each_dict_obs_dims = {
+            k: v for d in config.env.config.obs.obs_dims for k, v in d.items()}
     config.env.config.obs.obs_dims = each_dict_obs_dims
     logger.info(f"obs_dims: {each_dict_obs_dims}")
     auxiliary_obs_dims = {}
@@ -87,7 +94,7 @@ def parse_observation(cls: Any,
                       key_list: List,
                       buf_dict: Dict,
                       obs_scales: Dict,
-                      noise_scales: Dict,
+                      noise_scales: Union[Dict[str, float], float],
                       current_noise_curriculum_value: Any) -> None:
     """ Parse observations for the legged_robot_base class
     """
@@ -97,16 +104,16 @@ def parse_observation(cls: Any,
             obs_key = obs_key[:-4]
             obs_noise = 0.
         else:
-            obs_noise = noise_scales[obs_key] * current_noise_curriculum_value
+            if isinstance(noise_scales, dict):
+                obs_noise = noise_scales[obs_key] * \
+                    current_noise_curriculum_value
+            else:
+                obs_noise = noise_scales * current_noise_curriculum_value
 
         # print(f"obs_key: {obs_key}, obs_noise: {obs_noise}")
 
         actor_obs = getattr(cls, f"_get_obs_{obs_key}")().clone()
         obs_scale = obs_scales[obs_key]
-        # Yuanhang: use rand_like (uniform 0-1) instead of randn_like (N~[0,1])
-        # buf_dict[obs_key] = actor_obs * obs_scale + (torch.randn_like(actor_obs)* 2. - 1.) * obs_noise
-        # print("noise_scales", noise_scales)
-        # print("obs_noise", obs_noise)
         buf_dict[obs_key] = (
             actor_obs + (torch.rand_like(actor_obs) * 2. - 1.) * obs_noise) * obs_scale
 

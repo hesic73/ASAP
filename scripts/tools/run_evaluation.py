@@ -88,6 +88,8 @@ def run_evaluation(
         "+opt=my_eval_callbacks",
         f"+checkpoint={checkpoint_path}",
         f"algo.config.eval_callbacks.offline_rendering.config.video_filename={hv_video_path}",
+        "+env.config.obs.noise_scales=0.0",
+        "+env.config.reset_default_no_noise=true",
     ]
 
     if simulator == "isaacsim":
