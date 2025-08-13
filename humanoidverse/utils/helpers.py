@@ -47,7 +47,8 @@ def pre_process_config(config) -> None:
 
     # NOTE (hsc): 这里比较dirty，根本原因是我的配置不知为何结构被更改了
     if isinstance(config.env.config.obs.obs_dims, DictConfig):
-        each_dict_obs_dims = config.env.config.obs.obs_dims
+        each_dict_obs_dims = {k: v for k,
+                              v in config.env.config.obs.obs_dims.items()}
     else:
         each_dict_obs_dims = {
             k: v for d in config.env.config.obs.obs_dims for k, v in d.items()}
@@ -104,7 +105,7 @@ def parse_observation(cls: Any,
             obs_key = obs_key[:-4]
             obs_noise = 0.
         else:
-            if isinstance(noise_scales, dict):
+            if isinstance(noise_scales, (dict, DictConfig)):
                 obs_noise = noise_scales[obs_key] * \
                     current_noise_curriculum_value
             else:
