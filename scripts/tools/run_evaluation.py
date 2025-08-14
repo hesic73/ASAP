@@ -9,7 +9,6 @@ from loguru import logger
 def run_evaluation(
     log_dir: str,
     n_epochs: int = None,
-    isaacgym_obs_no_noise: bool = False,
     use_xvfb: bool = False,
     enforce_randomize_motion_start_eval: bool = False,
     simulator: str = "isaacgym",
@@ -91,16 +90,23 @@ def run_evaluation(
         "+env.config.obs.noise_scales=0.0",
         "+env.config.reset_default_no_noise=true",
     ]
-
-    if simulator == "isaacsim":
+    if simulator == "isaacgym":
+        eval_command.append("+simulator=isaacgym")
+        eval_command.append("+terrain=terrain_locomotion_plane")
+        eval_command.append("+env.config.env_spacing=5.0")
+        eval_command.append("+num_envs=1")
+    elif simulator == "isaacsim":
         eval_command.append("+simulator=isaacsim")
         eval_command.append("+terrain=terrain_locomotion_plane")
         eval_command.append("+env.config.env_spacing=5.0")
         eval_command.append("+num_envs=1")
-
-    if isaacgym_obs_no_noise:
-        eval_command.append(
-            "+obs=motion_tracking/no_noise")
+    elif simulator == "genesis":
+        eval_command.append("+simulator=genesis")
+        eval_command.append("+terrain=terrain_locomotion_plane")
+        eval_command.append("+env.config.env_spacing=5.0")
+        eval_command.append("+num_envs=1")
+    else:
+        raise ValueError(f"Simulator {simulator} not supported")
 
     if use_xvfb:
         logger.info("Using xvfb...")
