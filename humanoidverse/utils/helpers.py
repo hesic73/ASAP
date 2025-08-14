@@ -39,7 +39,7 @@ def pre_process_config(config) -> None:
     _obs_key_list = config.env.config.obs.obs_dict
     _aux_obs_key_list = config.env.config.obs.obs_auxiliary
 
-    if isinstance(config.env.config.obs.noise_scales, dict):
+    if isinstance(config.env.config.obs.noise_scales, (dict, DictConfig)):
         assert set(config.env.config.obs.noise_scales.keys()) == set(
             config.env.config.obs.obs_scales.keys())
 

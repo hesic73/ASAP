@@ -423,7 +423,8 @@ class IsaacGym(BaseSimulator):
         if self.env_config.domain_rand.randomize_base_mass:
             rng = self.env_config.domain_rand.added_mass_range
             # NOTE (hsc): 这里我做了breaking change，base用torso_link而不是pelvis
-            base_index = self._body_list.index("torso_link")
+            # NOTE (hsc, 2025-08-13): torso_link又学不会跳起了，也许torso_linkCoM displacement太难了，我还是改回pelvis
+            base_index = self._body_list.index("pelvis")
             assert base_index != -1
             # raise Exception("index 0 is for world, 13 is for torso!")
             # raise NotImplementedError
