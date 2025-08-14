@@ -117,9 +117,8 @@ def main(config: OmegaConf):
     with open(experiment_save_dir / "config.yaml", "w") as file:
         OmegaConf.save(unresolved_conf, file)
 
-    # NOTE (hsc): 这样好像会somehow导致我的config.yaml被更改
-    # wandb.save(str(experiment_save_dir / "config.yaml"),
-    #            base_path=experiment_save_dir)
+    motion_file = Path(config.robot.motion.motion_file)
+    wandb.save(motion_file, base_path=motion_file.parent)
 
     algo: BaseAlgo = instantiate(
         device=device, env=env, config=config.algo, log_dir=experiment_save_dir)
