@@ -121,7 +121,7 @@ def main(config: OmegaConf):
         OmegaConf.save(unresolved_conf, file)
 
     motion_file = Path(config.robot.motion.motion_file)
-    wandb.save(motion_file, base_path=motion_file.parent)
+    wandb.save(str(motion_file), base_path=str(motion_file.parent))
 
     algo: BaseAlgo = instantiate(
         device=device, env=env, config=config.algo, log_dir=experiment_save_dir)

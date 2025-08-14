@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 
 from humanoidverse.agents.base_algo.base_algo import BaseAlgo
 from humanoidverse.envs.base_task.base_task import BaseTask
-from humanoidverse.agents.modules.sac_modules import SACLogStdActor, SACCritic, DoubleQCritic, REDQEnsembleCritic
+from humanoidverse.agents.modules.sac_modules import SACActor, SACCritic, DoubleQCritic, REDQEnsembleCritic
 from humanoidverse.agents.modules.data_utils import ReplayBuffer
 from humanoidverse.agents.callbacks.base_callback import RL_EvalCallback
 from humanoidverse.utils.average_meters import TensorAverageMeterDict
@@ -113,7 +113,7 @@ class SAC(BaseAlgo):
         self.actor_frozen = False
 
     def setup(self):
-        self.actor = SACLogStdActor(
+        self.actor = SACActor(
             obs_dim_dict=self.algo_obs_dim_dict,
             module_config_dict=self.config.module_dict.actor,
             num_actions=self.num_actions,
@@ -712,7 +712,8 @@ class SAC(BaseAlgo):
 
     def load(self, ckpt_path: str):
         logger.info(f"Loading checkpoint from {ckpt_path}")
-        loaded_dict = torch.load(ckpt_path, map_location=self.device)
+        loaded_dict = torch.load(
+            ckpt_path, weights_only=True, map_location=self.device)
 
         self.actor.load_state_dict(loaded_dict["actor_model_state_dict"])
         self.critic.load_state_dict(loaded_dict["critic_state_dict"])
