@@ -12,6 +12,7 @@ def run_evaluation(
     use_xvfb: bool = False,
     enforce_randomize_motion_start_eval: bool = False,
     simulator: str = "isaacgym",
+    headless: bool = False,
 ):
 
     # 1. Determine n_epochs if not provided
@@ -50,8 +51,6 @@ def run_evaluation(
     gpu_id = gpu_id_process.stdout.strip()
     logger.info(f"Using GPU ID: {gpu_id}")
 
-    device = f"cuda:{gpu_id}"
-
     # 3. Read motion_file path from config.yaml
     config_path = os.path.join(log_dir, "config.yaml")
     logger.info(f"Reading motion_file path from {config_path}...")
@@ -82,7 +81,8 @@ def run_evaluation(
 
     eval_command = [
         "python", "humanoidverse/eval_offline.py",
-        f"+device={device}",
+        # NOTE (hsc): We use CUDA_VISIBLE_DEVICES to set the GPU ID
+        "+device=cuda:0",
         "+domain_rand=NO_domain_rand",  # disable domain randomization
         "+opt=my_eval_callbacks",
         f"+checkpoint={checkpoint_path}",
@@ -118,8 +118,16 @@ def run_evaluation(
         eval_command.append(
             "+env.config.enforce_randomize_motion_start_eval=True")
 
+    if headless:
+        logger.info("Running in headless mode...")
+        eval_command.append("+headless=True")
+
     logger.info(f"Running command:\n{' '.join(eval_command)}")
-    subprocess.run(eval_command, check=True)
+    # Set environment variable for Hydra full error reporting
+    env = os.environ.copy()
+    env["HYDRA_FULL_ERROR"] = "1"
+    env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    subprocess.run(eval_command, check=True, env=env)
     logger.info("Offline evaluation complete.")
 
     # 5. Run humanoid_sim2sim/run_single_motion.py
