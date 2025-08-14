@@ -14,7 +14,7 @@ defaults:
 
 # These are global variables that all levels of the config can access.
 ## Experiment setup
-seed: 0
+seed: 114514
 codebase_version: 1.0  # this is recorded to enable auto-conversion of models between different versions of the codebase
 headless: True
 num_envs: 4096

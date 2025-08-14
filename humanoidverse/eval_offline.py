@@ -171,7 +171,7 @@ def main(override_config: OmegaConf):
             f'Exported policy as onnx to: {os.path.join(exported_policy_path, exported_onnx_name)}')
 
     try:
-        algo.evaluate_policy(max_steps=300)
+        algo.evaluate_policy(max_steps=400)
     finally:
         if config.simulator.config.name == "isaacsim":
             simulation_app.close()

@@ -100,6 +100,9 @@ def main(config: OmegaConf):
     # fabric: Fabric = instantiate(config.fabric)
     # fabric.launch()
 
+    if config.seed is not None:
+        seeding(config.seed, torch_deterministic=False)
+
     # if config.seed is not None:
     #     rank = fabric.global_rank
     #     if rank is None:
