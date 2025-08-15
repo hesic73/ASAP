@@ -168,6 +168,20 @@ class SAC(BaseAlgo):
             tau=self.tau,
         )
 
+        # Initialize target actor network
+        self.target_actor = SACActor(
+            obs_dim_dict=self.algo_obs_dim_dict,
+            module_config_dict=self.config.module_dict.actor,
+            num_actions=self.num_actions,
+            init_noise_std=self.config.init_noise_std,
+            fixed_std=self.config.fixed_std,
+            tanh_loc=self.config.tanh_loc,
+            up_scale=self.config.up_scale,
+        ).to(self.device)
+
+        # Hard copy parameters from main actor to target actor
+        self.target_actor.load_state_dict(self.actor.state_dict())
+
         self.actor_optimizer = optim.Adam(
             self.actor.parameters(), lr=self.actor_learning_rate
         )
@@ -263,6 +277,13 @@ class SAC(BaseAlgo):
 
         return a_bound_loss
 
+    def _soft_update_target_actor(self):
+        """Soft update target actor network with moving average."""
+        for target_param, param in zip(self.target_actor.parameters(), self.actor.parameters()):
+            target_param.data.copy_(
+                (1.0 - self.tau) * target_param.data + self.tau * param.data
+            )
+
     def learn(self):
         obs_dict = self.env.reset_all()
         obs_dict = _dict_to_device(obs_dict, self.device)
@@ -351,11 +372,14 @@ class SAC(BaseAlgo):
         """Set networks to training mode."""
         self.actor.train()
         self.critic.train()
+        # Target actor should always be in eval mode
+        self.target_actor.eval()
 
     def _eval_mode(self):
         """Set networks to evaluation mode."""
         self.actor.eval()
         self.critic.eval()
+        self.target_actor.eval()
 
     def freeze_actor(self):
         """Freeze actor parameters to prevent updates during training."""
@@ -527,6 +551,7 @@ class SAC(BaseAlgo):
             # Update target networks
             if self.updates % self.target_update_frequency == 0:
                 self.critic.soft_update_targets()
+                self._soft_update_target_actor()
 
             self.updates += 1
 
@@ -576,9 +601,10 @@ class SAC(BaseAlgo):
         next_obs = next_obs_samples
 
         with torch.no_grad():
-            # Sample next actions from current policy
-            next_actions = self.actor.act(next_obs["actor_obs"])
-            next_log_probs = self.actor.get_actions_log_prob(next_actions)
+            # Sample next actions from TARGET ACTOR (key change!)
+            next_actions = self.target_actor.act(next_obs["actor_obs"])
+            next_log_probs = self.target_actor.get_actions_log_prob(
+                next_actions)
 
             # Use minimum Q from random subset of target critics
             target_q_min = self.critic.get_min_target_q(
@@ -732,6 +758,7 @@ class SAC(BaseAlgo):
         logger.info(f"Saving checkpoint to {path}")
         save_dict = {
             "actor_model_state_dict": self.actor.state_dict(),
+            "target_actor_state_dict": self.target_actor.state_dict(),
             "critic_state_dict": self.critic.state_dict(),
             "actor_optimizer_state_dict": self.actor_optimizer.state_dict(),
             "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
@@ -757,6 +784,15 @@ class SAC(BaseAlgo):
             ckpt_path, weights_only=True, map_location=self.device)
 
         self.actor.load_state_dict(loaded_dict["actor_model_state_dict"])
+        # Load target actor if it exists in checkpoint, otherwise copy from main actor
+        if "target_actor_state_dict" in loaded_dict:
+            self.target_actor.load_state_dict(
+                loaded_dict["target_actor_state_dict"])
+        else:
+            # For backward compatibility with old checkpoints
+            logger.warning(
+                "Target actor state not found in checkpoint, copying from main actor")
+            self.target_actor.load_state_dict(self.actor.state_dict())
         self.critic.load_state_dict(loaded_dict["critic_state_dict"])
 
         self.actor_optimizer.load_state_dict(
@@ -787,6 +823,15 @@ class SAC(BaseAlgo):
         loaded_dict = torch.load(
             ckpt_path, weights_only=True, map_location=self.device)
         self.actor.load_state_dict(loaded_dict["actor_model_state_dict"])
+        # Also update target actor when loading actor only
+        if "target_actor_state_dict" in loaded_dict:
+            self.target_actor.load_state_dict(
+                loaded_dict["target_actor_state_dict"])
+        else:
+            # For backward compatibility with old checkpoints
+            logger.warning(
+                "Target actor state not found in checkpoint, copying from main actor")
+            self.target_actor.load_state_dict(self.actor.state_dict())
         self.actor_optimizer.load_state_dict(
             loaded_dict["actor_optimizer_state_dict"])
         logger.info("Actor checkpoint loaded successfully")
@@ -796,6 +841,7 @@ class SAC(BaseAlgo):
         """Return models for inference."""
         return {
             "actor": self.actor,
+            "target_actor": self.target_actor,
             "critic": self.critic,
         }
 

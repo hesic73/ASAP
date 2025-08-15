@@ -22,7 +22,7 @@ algo:
     alpha_learning_rate: 1e-5
 
     # Action bound loss
-    action_bound_loss_weight: 10.0
+    action_bound_loss_weight: 0.0
     
     # Entropy regularization
     autotune_alpha: false  # Set to true for automatic alpha tuning
