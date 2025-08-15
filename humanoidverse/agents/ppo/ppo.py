@@ -197,7 +197,8 @@ class PPO(BaseAlgo):
         # import ipdb; ipdb.set_trace()
         if ckpt_path is not None:
             logger.info(f"Loading checkpoint from {ckpt_path}")
-            loaded_dict = torch.load(ckpt_path, map_location=self.device)
+            loaded_dict = torch.load(
+                ckpt_path, weights_only=True, map_location=self.device)
             self.actor.load_state_dict(loaded_dict["actor_model_state_dict"])
             self.critic.load_state_dict(loaded_dict["critic_model_state_dict"])
             if self.load_optimizer:

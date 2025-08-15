@@ -45,8 +45,9 @@ class IsaacGym(BaseSimulator):
             self.device = 'cpu'
 
         self.graphics_device_id = self.sim_device_id
-        if self.headless == True:
-            self.graphics_device_id = -1
+        # NOTE (hsc): offline rendering still needs a graphics device id
+        # if self.headless:
+        #     self.graphics_device_id = -1
 
         sim = self.gym.create_sim(
             self.sim_device_id,
@@ -383,7 +384,8 @@ class IsaacGym(BaseSimulator):
                 logger.debug("randomizing base com")
             try:
                 torso_index = self._body_list.index("torso_link")
-            except:
+            except Exception as e:
+                print(e)
                 # for fixed upper URDF we only have pelvis link
                 torso_index = self._body_list.index("pelvis")
             assert torso_index != -1
@@ -501,7 +503,8 @@ class IsaacGym(BaseSimulator):
 
         self.refresh_sim_tensors()
 
-        self.all_root_states: Tensor = gymtorch.wrap_tensor(actor_root_state)
+        self.all_root_states: torch.Tensor = gymtorch.wrap_tensor(
+            actor_root_state)
         num_actors = self._get_num_actors_per_env()
         self.robot_root_states = self.all_root_states.view(
             self.num_envs, num_actors, actor_root_state.shape[-1]
