@@ -233,6 +233,12 @@ class SAC(BaseAlgo):
         logger.info(
             f"Action bound loss weight: {self.action_bound_loss_weight}")
 
+        # KL divergence regularization
+        self.kl_divergence_weight = self.config.kl_divergence_weight
+        self.base_actor = None  # Will be set when loading from checkpoint
+        logger.info(
+            f"KL divergence weight: {self.kl_divergence_weight}")
+
     def _get_action_scaling(self):
         qpos_limits, _, _ = self.env.simulator.get_dof_limits_properties()
         qpos_limits = qpos_limits.cpu()  # (num_dof, 2)
@@ -276,6 +282,35 @@ class SAC(BaseAlgo):
         a_bound_loss = 0.5 * torch.mean(violation)
 
         return a_bound_loss
+
+    def _kl_divergence_loss(self, current_mean, current_std, base_mean, base_std):
+        """
+        Compute KL divergence between two multivariate Gaussian distributions.
+        KL(p||q) = 0.5 * [tr(Σ_q^-1 * Σ_p) + (μ_q - μ_p)^T * Σ_q^-1 * (μ_q - μ_p) - k + ln(det(Σ_q)/det(Σ_p))]
+
+        For diagonal covariance matrices:
+        KL(p||q) = 0.5 * [sum(σ_p^2 / σ_q^2) + sum((μ_q - μ_p)^2 / σ_q^2) - k + sum(ln(σ_q^2 / σ_p^2))]
+
+        Args:
+            current_mean: Mean of current policy [batch_size, action_dim]
+            current_std: Std of current policy [batch_size, action_dim]
+            base_mean: Mean of base policy [batch_size, action_dim]
+            base_std: Std of base policy [batch_size, action_dim]
+
+        Returns:
+            KL divergence loss (scalar)
+        """
+        # Compute KL divergence components
+        var_ratio = (current_std ** 2) / (base_std ** 2)  # σ_p^2 / σ_q^2
+        mean_diff_sq = ((base_mean - current_mean) ** 2) / \
+            (base_std ** 2)  # (μ_q - μ_p)^2 / σ_q^2
+        # ln(σ_q^2 / σ_p^2)
+        log_var_ratio = 2 * torch.log(base_std / current_std)
+
+        # Sum over action dimensions, then take mean over batch
+        kl_div = 0.5 * torch.sum(var_ratio +
+                                 mean_diff_sq - 1 + log_var_ratio, dim=-1)
+        return torch.mean(kl_div)
 
     def _soft_update_target_actor(self):
         """Soft update target actor network with moving average."""
@@ -476,7 +511,7 @@ class SAC(BaseAlgo):
         """Collect samples and train online (like CleanRL)."""
         sample_count = 0
         loss_dict = {'Critic': [], 'Actor': [], 'Alpha': [],
-                     'Actor_Entropy_Term': [], 'Actor_Q_Term': [], 'Action_Bound': []}
+                     'Actor_Entropy_Term': [], 'Actor_Q_Term': [], 'Action_Bound': [], 'KL_Divergence': []}
         metrics_dict = {}
 
         collection_time = 0.0
@@ -526,6 +561,8 @@ class SAC(BaseAlgo):
                     loss_dict['Alpha'].append(actor_result['alpha_loss'])
                     loss_dict['Action_Bound'].append(
                         actor_result['action_bound_loss'])
+                    loss_dict['KL_Divergence'].append(
+                        actor_result['kl_loss'])
 
                     # Log actor loss components
                     if 'Actor_Entropy_Term' not in loss_dict:
@@ -688,10 +725,28 @@ class SAC(BaseAlgo):
         action_bound_loss = self._action_bound_loss(self.actor.action_mean)
         actor_loss += action_bound_loss * self.action_bound_loss_weight
 
+        # Add KL divergence loss (if base actor exists and weight > 0)
+        kl_loss = torch.tensor(0.0, device=self.device)
+        if self.base_actor is not None and self.kl_divergence_weight > 0:
+            with torch.no_grad():
+                # Get base policy distribution for the same observations
+                self.base_actor.update_distribution(obs["actor_obs"])
+                base_mean = self.base_actor.action_mean
+                base_std = self.base_actor.action_std
+
+            # Current policy distribution (already computed)
+            current_mean = self.actor.action_mean
+            current_std = self.actor.action_std
+
+            kl_loss = self._kl_divergence_loss(
+                current_mean, current_std, base_mean, base_std)
+            actor_loss += kl_loss * self.kl_divergence_weight
+
         # Log actor loss components for monitoring
         with torch.no_grad():
             mean_entropy_term = entropy_term.mean().item()
             mean_q_term = q_term.mean().item()
+            kl_loss_item = kl_loss.item()
 
         # Update actor
         self.actor_optimizer.zero_grad()
@@ -726,6 +781,7 @@ class SAC(BaseAlgo):
                 'actor_loss': actor_loss.item(),
                 'alpha_loss': alpha_loss.item(),
                 'action_bound_loss': action_bound_loss.item(),
+                'kl_loss': kl_loss_item,
                 'actor_grad_norm': actor_grad_norm.item(),
                 'entropy_term': mean_entropy_term,
                 'q_term': mean_q_term,
@@ -737,6 +793,7 @@ class SAC(BaseAlgo):
                 'actor_loss': actor_loss.item(),
                 'alpha_loss': 0.0,
                 'action_bound_loss': action_bound_loss.item(),
+                'kl_loss': kl_loss_item,
                 'actor_grad_norm': actor_grad_norm.item(),
                 'entropy_term': mean_entropy_term,
                 'q_term': mean_q_term,
@@ -816,6 +873,25 @@ class SAC(BaseAlgo):
         self.total_steps = loaded_dict["total_steps"]
         self.updates = loaded_dict["updates"]
 
+        # Set base actor for KL divergence regularization (copy of loaded actor)
+        if self.kl_divergence_weight > 0:
+            self.base_actor = SACActor(
+                obs_dim_dict=self.algo_obs_dim_dict,
+                module_config_dict=self.config.module_dict.actor,
+                num_actions=self.num_actions,
+                init_noise_std=self.config.init_noise_std,
+                fixed_std=self.config.fixed_std,
+                tanh_loc=self.config.tanh_loc,
+                up_scale=self.config.up_scale,
+            ).to(self.device)
+            self.base_actor.load_state_dict(self.actor.state_dict())
+            self.base_actor.eval()  # Set to eval mode and freeze
+            for param in self.base_actor.parameters():
+                param.requires_grad = False
+            logger.info("Base actor set for KL divergence regularization")
+        else:
+            logger.info("KL divergence weight is 0, base actor not set")
+
         logger.info("Checkpoint loaded successfully")
 
     def load_actor_only(self, ckpt_path: str):
@@ -834,6 +910,26 @@ class SAC(BaseAlgo):
             self.target_actor.load_state_dict(self.actor.state_dict())
         self.actor_optimizer.load_state_dict(
             loaded_dict["actor_optimizer_state_dict"])
+
+        # Set base actor for KL divergence regularization (copy of loaded actor)
+        if self.kl_divergence_weight > 0:
+            self.base_actor = SACActor(
+                obs_dim_dict=self.algo_obs_dim_dict,
+                module_config_dict=self.config.module_dict.actor,
+                num_actions=self.num_actions,
+                init_noise_std=self.config.init_noise_std,
+                fixed_std=self.config.fixed_std,
+                tanh_loc=self.config.tanh_loc,
+                up_scale=self.config.up_scale,
+            ).to(self.device)
+            self.base_actor.load_state_dict(self.actor.state_dict())
+            self.base_actor.eval()  # Set to eval mode and freeze
+            for param in self.base_actor.parameters():
+                param.requires_grad = False
+            logger.info("Base actor set for KL divergence regularization")
+        else:
+            logger.info("KL divergence weight is 0, base actor not set")
+
         logger.info("Actor checkpoint loaded successfully")
 
     @property

@@ -24,6 +24,9 @@ algo:
     # Action bound loss
     action_bound_loss_weight: 0.0
     
+    # KL divergence regularization (relative to base policy from checkpoint)
+    kl_divergence_weight: 1.0
+    
     # Entropy regularization
     autotune_alpha: false  # Set to true for automatic alpha tuning
     alpha: 0.0  # Fixed alpha value (used when autotune_alpha is false)
