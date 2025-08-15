@@ -100,9 +100,6 @@ def main(config: OmegaConf):
     # fabric: Fabric = instantiate(config.fabric)
     # fabric.launch()
 
-    if config.seed is not None:
-        seeding(config.seed, torch_deterministic=False)
-
     # if config.seed is not None:
     #     rank = fabric.global_rank
     #     if rank is None:
@@ -120,18 +117,21 @@ def main(config: OmegaConf):
     with open(experiment_save_dir / "config.yaml", "w") as file:
         OmegaConf.save(unresolved_conf, file)
 
-    motion_file = Path(config.robot.motion.motion_file)
-    wandb.save(str(motion_file), base_path=str(motion_file.parent))
+    wandb.save(str(experiment_save_dir / "config.yaml"),
+               base_path=experiment_save_dir)
 
-    algo: BaseAlgo = instantiate(
+    from humanoidverse.agents.sac.sac import SAC
+    algo: SAC = instantiate(
         device=device, env=env, config=config.algo, log_dir=experiment_save_dir)
+    assert isinstance(algo, SAC), "Only SAC is supported"
+
     algo.setup()
     # import ipdb;    ipdb.set_trace()
-    if config.checkpoint is not None:
-        algo.load(config.checkpoint)
+    assert config.checkpoint is not None, "checkpoint is required"
+    algo.load(config.checkpoint)
 
     try:
-        algo.learn()
+        algo.rollout(num_iterations=1000)
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt, exiting...")
     finally:

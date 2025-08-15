@@ -134,11 +134,13 @@ def main(config: OmegaConf):
     if config.get("freeze_actor", True):
         algo.freeze_actor()
 
-    # handle saving config
-    algo.learn()
-
-    if simulator_type == 'IsaacSim':
-        simulation_app.close()
+    try:
+        algo.learn()
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt, exiting...")
+    finally:
+        if simulator_type == 'IsaacSim':
+            simulation_app.close()
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 
 from humanoidverse.agents.base_algo.base_algo import BaseAlgo
 from humanoidverse.envs.base_task.base_task import BaseTask
-from humanoidverse.agents.modules.sac_modules import SACActor, SACCritic, DoubleQCritic, REDQEnsembleCritic
+from humanoidverse.agents.modules.sac_modules import SACActor, SACCritic, REDQEnsembleCritic
 from humanoidverse.agents.modules.data_utils import ReplayBuffer
 from humanoidverse.agents.callbacks.base_callback import RL_EvalCallback
 from humanoidverse.utils.average_meters import TensorAverageMeterDict
@@ -304,6 +304,45 @@ class SAC(BaseAlgo):
             self.ep_infos.clear()
 
         self.current_learning_iteration += self.num_learning_iterations
+
+    def rollout(self, num_iterations: int):
+        """
+        Perform rollout to collect episodes data without training.
+
+        Args:
+            num_iterations: Number of iterations to collect, each iteration collects samples_per_iter steps
+        """
+
+        self.env.set_is_evaluating()
+
+        obs_dict = self.env.reset_all()
+        obs_dict = _dict_to_device(obs_dict, self.device)
+        self._eval_mode()  # Set to evaluation mode for rollout
+
+        # Clear previous episode data
+        self.ep_infos.clear()
+        self.rewbuffer.clear()
+        self.lenbuffer.clear()
+        self.episode_rewards.clear()
+        self.episode_lengths.clear()
+
+        # Reset episode tracking
+        self.current_episode_reward = torch.zeros(
+            self.num_envs, device=self.device)
+        self.current_episode_length = torch.zeros(
+            self.num_envs, device=self.device)
+
+        logger.info(f"Starting rollout for {num_iterations} iterations")
+
+        for iteration in range(num_iterations):
+            # Collect samples_per_iter steps (like _collect_and_train_online but no training)
+            sample_count = 0
+            while sample_count < self.samples_per_iter:
+                obs_dict = self._collect_experience(obs_dict)
+                sample_count += self.num_envs
+
+            # Log after each iteration
+            self._post_rollout_logging(iteration + 1)
 
     def _train_mode(self):
         """Set networks to training mode."""
@@ -697,7 +736,6 @@ class SAC(BaseAlgo):
             "total_steps": self.total_steps,
             "updates": self.updates,
             "autotune_alpha": self.autotune_alpha,
-            "actor_frozen": self.actor_frozen,
             "num_critics": self.num_critics,
             "num_sample_critics": self.num_sample_critics,
         }
@@ -738,18 +776,6 @@ class SAC(BaseAlgo):
         self.current_learning_iteration = loaded_dict["iter"]
         self.total_steps = loaded_dict["total_steps"]
         self.updates = loaded_dict["updates"]
-
-        # Load actor frozen state
-        if "actor_frozen" in loaded_dict:
-            self.actor_frozen = loaded_dict["actor_frozen"]
-            if self.actor_frozen:
-                # Re-freeze actor parameters if they were frozen
-                for param in self.actor.parameters():
-                    param.requires_grad = False
-                logger.info(
-                    "Actor parameters remain frozen after loading checkpoint")
-        else:
-            self.actor_frozen = False
 
         logger.info("Checkpoint loaded successfully")
 
@@ -940,6 +966,58 @@ class SAC(BaseAlgo):
         with Live(Panel(log_string, title="SAC Training Log"), refresh_per_second=4, console=console):
             pass
 
+    def _post_rollout_logging(self, iteration: int, width=80, pad=35):
+        """Logging method specifically for rollout results."""
+        # Environment metrics
+        env_log_dict = self.episode_env_tensors.mean_and_clear()
+        env_log_dict = {f"Env/{k}": v for k, v in env_log_dict.items()}
+
+        # Log to TensorBoard
+        self._logging_rollout_to_writer(iteration, env_log_dict)
+
+        # Create console output
+        str_header = f" \033[1m SAC Rollout Iteration {iteration} \033[0m "
+
+        if len(self.rewbuffer) > 0:
+            log_string = (f"""{str_header.center(width, ' ')}\n\n"""
+                          f"""{'Total steps:':>{pad}} {self.total_steps}\n"""
+                          f"""{'Mean reward:':>{pad}} {statistics.mean(self.rewbuffer):.2f}\n"""
+                          f"""{'Mean episode length:':>{pad}} {statistics.mean(self.lenbuffer):.2f}\n""")
+        else:
+            log_string = (f"""{str_header.center(width, ' ')}\n\n"""
+                          f"""{'Total steps:':>{pad}} {self.total_steps}\n""")
+
+        # Add environment metrics
+        env_log_string = ""
+        for k, v in env_log_dict.items():
+            entry = f"{f'{k}:':>{pad}} {v:.4f}"
+            env_log_string += f"{entry}\n"
+        log_string += env_log_string
+
+        # Add episode info
+        ep_string = ''
+        if self.ep_infos:
+            for key in self.ep_infos[0]:
+                infotensor = torch.tensor([], device=self.device)
+                for ep_info in self.ep_infos:
+                    # handle scalar and zero dimensional tensor infos
+                    if not isinstance(ep_info[key], torch.Tensor):
+                        ep_info[key] = torch.Tensor([ep_info[key]])
+                    if len(ep_info[key].shape) == 0:
+                        ep_info[key] = ep_info[key].unsqueeze(0)
+                    infotensor = torch.cat(
+                        (infotensor, ep_info[key].to(self.device)))
+                value = torch.mean(infotensor)
+                ep_string += f"""{f'Mean episode {key}:':>{pad}}
+                    {value:.4f}\n"""
+        log_string += ep_string
+
+        log_string += (f"""{'-' * width}\n"""
+                       f"""{'Iteration completed:':>{pad}} {iteration}\n""")
+
+        console.print(
+            Panel(log_string, title="[bold green]SAC Rollout Log", border_style="green"))
+
     def _logging_to_writer(self, log_dict, train_log_dict, env_log_dict):
         """Log metrics to TensorBoard."""
         # Loss logging
@@ -1017,6 +1095,38 @@ class SAC(BaseAlgo):
         if 'alpha_value' in log_dict:
             self.writer.add_scalar(
                 'Policy/alpha_value', log_dict['alpha_value'], log_dict['it'])
+
+    def _logging_rollout_to_writer(self, iteration: int, env_log_dict: Dict[str, float]):
+        """Log rollout results to TensorBoard."""
+        # Log episode rewards and lengths (following training code pattern)
+        if len(self.rewbuffer) > 0:
+            self.writer.add_scalar(
+                'Rollout/mean_reward', statistics.mean(self.rewbuffer), iteration)
+            self.writer.add_scalar(
+                'Rollout/mean_episode_length', statistics.mean(self.lenbuffer), iteration)
+
+        # Log total steps
+        self.writer.add_scalar('Rollout/total_steps',
+                               self.total_steps, iteration)
+
+        # Log environment metrics
+        if len(env_log_dict) > 0:
+            for k, v in env_log_dict.items():
+                self.writer.add_scalar(k, v, iteration)
+
+        # Log episode info
+        if self.ep_infos:
+            for key in self.ep_infos[0]:
+                infotensor = torch.tensor([], device=self.device)
+                for ep_info in self.ep_infos:
+                    if not isinstance(ep_info[key], torch.Tensor):
+                        ep_info[key] = torch.Tensor([ep_info[key]])
+                    if len(ep_info[key].shape) == 0:
+                        ep_info[key] = ep_info[key].unsqueeze(0)
+                    infotensor = torch.cat(
+                        (infotensor, ep_info[key].to(self.device)))
+                value = torch.mean(infotensor)
+                self.writer.add_scalar(f'Episode/{key}', value, iteration)
 
     def env_step(self, actor_state):
         """Environment step for evaluation."""

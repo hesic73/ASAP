@@ -172,6 +172,8 @@ def main(override_config: OmegaConf):
 
     try:
         algo.evaluate_policy(max_steps=400)
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt, exiting...")
     finally:
         if config.simulator.config.name == "isaacsim":
             simulation_app.close()
