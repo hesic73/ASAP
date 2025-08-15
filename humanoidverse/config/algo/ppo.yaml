@@ -18,6 +18,9 @@ algo:
     schedule: "adaptive"
     desired_kl: 0.01
 
+    # Action bound loss
+    action_bound_loss_weight: 1.0
+
     num_steps_per_env: 32
     save_interval: 100
 

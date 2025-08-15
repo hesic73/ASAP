@@ -95,12 +95,59 @@ class PPO(BaseAlgo):
         self.max_grad_norm = self.config.max_grad_norm
         self.use_clipped_value_loss = self.config.use_clipped_value_loss
 
+        # Action bound loss
+        self.action_bound_loss_weight = self.config.action_bound_loss_weight
+
+    def _action_bound_loss(self, action_mean):
+        """Compute action bound loss to prevent actions from going out of bounds."""
+        # Use pre-computed action bounds
+        a_bound_min = self.a_bound_min
+        a_bound_max = self.a_bound_max
+
+        # Compute violations
+        violation_min = torch.minimum(
+            action_mean - a_bound_min, torch.zeros_like(action_mean))
+        violation_max = torch.maximum(
+            action_mean - a_bound_max, torch.zeros_like(action_mean))
+
+        # Sum squared violations
+        violation = torch.sum(torch.square(violation_min), dim=-1) + \
+            torch.sum(torch.square(violation_max), dim=-1)
+
+        # Return mean violation loss (without weight)
+        a_bound_loss = 0.5 * torch.mean(violation)
+
+        return a_bound_loss
+
     def setup(self):
         # import ipdb; ipdb.set_trace()
         logger.info("Setting up PPO")
         self._setup_models_and_optimizer()
         logger.info("Setting up Storage")
         self._setup_storage()
+
+        # Pre-compute action bounds for action bound loss
+        qpos_limits, _, _ = self.env.simulator.get_dof_limits_properties()
+        qpos_limits = qpos_limits.to(self.device)  # (num_dof, 2)
+        default_dof_pos = self.env.default_dof_pos.to(
+            self.device).squeeze(0)  # (num_dof,)
+
+        # Convert to action space bounds
+        _action_scale = self.env.action_scale
+        raw_action_limits = (
+            qpos_limits - default_dof_pos.unsqueeze(-1)) / _action_scale
+
+        # Store action bounds
+        self.a_bound_min = raw_action_limits[:, 0]  # (num_dof,)
+        self.a_bound_max = raw_action_limits[:, 1]  # (num_dof,)
+
+        # Ensure bounds are finite
+        assert torch.all(torch.isfinite(self.a_bound_min)) and torch.all(
+            torch.isfinite(self.a_bound_max)), "Actions must be bounded."
+
+        # Action bound loss weight
+        logger.info(
+            f"Action bound loss weight: {self.action_bound_loss_weight}")
 
     def _setup_models_and_optimizer(self):
         actor_config = self.config.actor.copy()
@@ -408,6 +455,7 @@ class PPO(BaseAlgo):
         loss_dict['Value'] = 0
         loss_dict['Surrogate'] = 0
         loss_dict['Entropy'] = 0
+        loss_dict['Action_Bound'] = 0
         return loss_dict
 
     def _update_algo_step(self, policy_state_dict, loss_dict):
@@ -481,6 +529,10 @@ class PPO(BaseAlgo):
         entropy_loss = entropy_batch.mean()
         actor_loss = surrogate_loss - self.entropy_coef * entropy_loss
 
+        # Add action bound loss
+        action_bound_loss = self._action_bound_loss(mu_batch)
+        actor_loss += action_bound_loss * self.action_bound_loss_weight
+
         critic_loss = self.value_loss_coef * value_loss
 
         self.actor_optimizer.zero_grad()
@@ -512,10 +564,12 @@ class PPO(BaseAlgo):
         metrics_dict['Action_Mean'] = action_mean_avg.item()
         metrics_dict['Action_Std'] = action_std_avg.item()
         metrics_dict['Entropy'] = entropy_avg.item()
+        metrics_dict['Action_Bound'] = action_bound_loss.item()
 
         loss_dict['Value'] += value_loss.item()
         loss_dict['Surrogate'] += surrogate_loss.item()
         loss_dict['Entropy'] += entropy_loss.item()
+        loss_dict['Action_Bound'] = action_bound_loss.item()
         return loss_dict, metrics_dict
 
     def set_learning_rate(self, actor_learning_rate, critic_learning_rate):
@@ -599,6 +653,8 @@ class PPO(BaseAlgo):
                 elif k == 'Action_Std':
                     entry = f"{f'{k}:':>{pad}} {v:.4f}"
                 elif k == 'Action_Mean' or k == 'Entropy':
+                    entry = f"{f'{k}:':>{pad}} {v:.4f}"
+                elif k == 'Action_Bound':
                     entry = f"{f'{k}:':>{pad}} {v:.4f}"
                 else:
                     entry = f"{f'{k}:':>{pad}} {v:.4f}"
