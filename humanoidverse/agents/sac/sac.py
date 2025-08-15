@@ -28,6 +28,8 @@ from hydra.utils import instantiate
 from typing import Optional, Dict, List
 from itertools import count
 
+from tqdm import trange
+
 console = Console()
 
 
@@ -118,6 +120,7 @@ class SAC(BaseAlgo):
             module_config_dict=self.config.module_dict.actor,
             num_actions=self.num_actions,
             init_noise_std=self.config.init_noise_std,
+            fixed_std=self.config.fixed_std,
             tanh_loc=self.config.tanh_loc,
             up_scale=self.config.up_scale,
         ).to(self.device)
@@ -455,79 +458,79 @@ class SAC(BaseAlgo):
         collection_time = 0.0
         training_time = 0.0
 
+        collect_start = time.time()
         while sample_count < num_samples:
-            # Collect one step of experience
-            collect_start = time.time()
             obs_dict = self._collect_experience(obs_dict)
-            collection_time += time.time() - collect_start
             sample_count += self.num_envs
 
-            # Train (we already collected initial samples in setup)
-            train_start = time.time()
+        collection_time += time.time() - collect_start
 
-            # Perform gradient_steps updates per env step
-            for _ in range(self.gradient_steps):
-                # Update critics every update
-                critic_result = self._update_critics_step()
-                loss_dict['Critic'].append(critic_result['critic_loss'])
+        # Train (we already collected initial samples in setup)
+        train_start = time.time()
 
-                # Add critic metrics to metrics_dict
-                if 'Critic_Grad_Norm' not in metrics_dict:
-                    metrics_dict['Critic_Grad_Norm'] = 0
-                if 'Mean_Min_Q' not in metrics_dict:
-                    metrics_dict['Mean_Min_Q'] = 0
-                if 'Mean_Target_Q' not in metrics_dict:
-                    metrics_dict['Mean_Target_Q'] = 0
-                if 'Mean_Entropy_Contribution' not in metrics_dict:
-                    metrics_dict['Mean_Entropy_Contribution'] = 0
-                if 'Mean_Log_Prob' not in metrics_dict:
-                    metrics_dict['Mean_Log_Prob'] = 0
+        # Perform gradient_steps updates per env step
+        for _ in range(self.gradient_steps):
+            # Update critics every update
+            critic_result = self._update_critics_step()
+            loss_dict['Critic'].append(critic_result['critic_loss'])
 
-                metrics_dict['Critic_Grad_Norm'] += critic_result['critic_grad_norm']
-                metrics_dict['Mean_Min_Q'] += critic_result['mean_min_q']
-                metrics_dict['Mean_Target_Q'] += critic_result['mean_target_q']
-                metrics_dict['Mean_Entropy_Contribution'] += critic_result['mean_entropy_contribution']
-                metrics_dict['Mean_Log_Prob'] += critic_result['mean_log_prob']
+            # Add critic metrics to metrics_dict
+            if 'Critic_Grad_Norm' not in metrics_dict:
+                metrics_dict['Critic_Grad_Norm'] = 0
+            if 'Mean_Min_Q' not in metrics_dict:
+                metrics_dict['Mean_Min_Q'] = 0
+            if 'Mean_Target_Q' not in metrics_dict:
+                metrics_dict['Mean_Target_Q'] = 0
+            if 'Mean_Entropy_Contribution' not in metrics_dict:
+                metrics_dict['Mean_Entropy_Contribution'] = 0
+            if 'Mean_Log_Prob' not in metrics_dict:
+                metrics_dict['Mean_Log_Prob'] = 0
 
-                # Update actor and alpha with policy frequency (delayed updates)
-                # Skip actor updates if actor is frozen
-                if not self.actor_frozen and self.updates % self.policy_frequency == 0:
-                    # Compensate for delay by doing policy_frequency updates
-                    for _ in range(self.policy_frequency):
-                        actor_result = self._update_actor_and_alpha_step()
-                        loss_dict['Actor'].append(actor_result['actor_loss'])
-                        loss_dict['Alpha'].append(actor_result['alpha_loss'])
-                        loss_dict['Action_Bound'].append(
-                            actor_result['action_bound_loss'])
+            metrics_dict['Critic_Grad_Norm'] += critic_result['critic_grad_norm']
+            metrics_dict['Mean_Min_Q'] += critic_result['mean_min_q']
+            metrics_dict['Mean_Target_Q'] += critic_result['mean_target_q']
+            metrics_dict['Mean_Entropy_Contribution'] += critic_result['mean_entropy_contribution']
+            metrics_dict['Mean_Log_Prob'] += critic_result['mean_log_prob']
 
-                        # Log actor loss components
-                        if 'Actor_Entropy_Term' not in loss_dict:
-                            loss_dict['Actor_Entropy_Term'] = []
-                        if 'Actor_Q_Term' not in loss_dict:
-                            loss_dict['Actor_Q_Term'] = []
-                        loss_dict['Actor_Entropy_Term'].append(
-                            actor_result['entropy_term'])
-                        loss_dict['Actor_Q_Term'].append(
-                            actor_result['q_term'])
+            # Update actor and alpha with policy frequency (delayed updates)
+            # Skip actor updates if actor is frozen
+            if not self.actor_frozen and self.updates % self.policy_frequency == 0:
+                # Compensate for delay by doing policy_frequency updates
+                for _ in range(self.policy_frequency):
+                    actor_result = self._update_actor_and_alpha_step()
+                    loss_dict['Actor'].append(actor_result['actor_loss'])
+                    loss_dict['Alpha'].append(actor_result['alpha_loss'])
+                    loss_dict['Action_Bound'].append(
+                        actor_result['action_bound_loss'])
 
-                        # Add actor grad norm to metrics
-                        if 'Actor_Grad_Norm' not in metrics_dict:
-                            metrics_dict['Actor_Grad_Norm'] = 0
-                        metrics_dict['Actor_Grad_Norm'] += actor_result['actor_grad_norm']
+                    # Log actor loss components
+                    if 'Actor_Entropy_Term' not in loss_dict:
+                        loss_dict['Actor_Entropy_Term'] = []
+                    if 'Actor_Q_Term' not in loss_dict:
+                        loss_dict['Actor_Q_Term'] = []
+                    loss_dict['Actor_Entropy_Term'].append(
+                        actor_result['entropy_term'])
+                    loss_dict['Actor_Q_Term'].append(
+                        actor_result['q_term'])
 
-                        # Accumulate metrics
-                        for key, value in actor_result['metrics_dict'].items():
-                            if key not in metrics_dict:
-                                metrics_dict[key] = 0
-                            metrics_dict[key] += value
+                    # Add actor grad norm to metrics
+                    if 'Actor_Grad_Norm' not in metrics_dict:
+                        metrics_dict['Actor_Grad_Norm'] = 0
+                    metrics_dict['Actor_Grad_Norm'] += actor_result['actor_grad_norm']
 
-                # Update target networks
-                if self.updates % self.target_update_frequency == 0:
-                    self.critic.soft_update_targets()
+                    # Accumulate metrics
+                    for key, value in actor_result['metrics_dict'].items():
+                        if key not in metrics_dict:
+                            metrics_dict[key] = 0
+                        metrics_dict[key] += value
 
-                self.updates += 1
+            # Update target networks
+            if self.updates % self.target_update_frequency == 0:
+                self.critic.soft_update_targets()
 
-            training_time += time.time() - train_start
+            self.updates += 1
+
+        training_time += time.time() - train_start
 
         # Average the losses
         averaged_loss_dict = {}
@@ -848,8 +851,6 @@ class SAC(BaseAlgo):
         if max_steps is None:
             it = count(0)
         else:
-            from tqdm import trange
-
             it = trange(max_steps)
 
         for step in it:

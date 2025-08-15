@@ -134,6 +134,9 @@ def main(config: OmegaConf):
         algo.learn()
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt, exiting...")
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        raise e
     finally:
         if simulator_type == 'IsaacSim':
             simulation_app.close()
