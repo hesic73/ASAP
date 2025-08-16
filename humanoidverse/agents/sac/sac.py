@@ -684,7 +684,6 @@ class SAC(BaseAlgo):
         # Log Q values for monitoring
         with torch.no_grad():
             mean_min_q = torch.min(current_q_values, dim=0)[0].mean().item()
-            print(mean_min_q)
             mean_target_q = target_values.mean().item()
 
             # Log entropy contribution to target Q
