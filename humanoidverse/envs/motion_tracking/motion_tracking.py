@@ -249,7 +249,10 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             return
         self.motion_len[env_ids] = self._motion_lib.get_motion_length(
             self.motion_ids[env_ids])
-        if self.is_evaluating and not self.config.enforce_randomize_motion_start_eval:
+        if self.config.get("no_resample_motion_start_time", False):
+            self.motion_start_times[env_ids] = torch.zeros(
+                len(env_ids), dtype=torch.float32, device=self.device)
+        elif self.is_evaluating and not self.config.enforce_randomize_motion_start_eval:
             self.motion_start_times[env_ids] = torch.zeros(
                 len(env_ids), dtype=torch.float32, device=self.device)
         else:

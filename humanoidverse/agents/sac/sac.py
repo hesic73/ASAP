@@ -372,7 +372,7 @@ class SAC(BaseAlgo):
             num_iterations: Number of iterations to collect, each iteration collects samples_per_iter steps
         """
 
-        self.env.set_is_evaluating()
+        # self.env.set_is_evaluating()
 
         obs_dict = self.env.reset_all()
         obs_dict = _dict_to_device(obs_dict, self.device)
@@ -604,10 +604,18 @@ class SAC(BaseAlgo):
 
         # Average the metrics
         averaged_metrics_dict = {}
-        # Use actor updates as reference
-        num_updates = max(1, len(loss_dict['Actor']))
+        # Use appropriate update count for different metrics
+        num_critic_updates = max(1, len(loss_dict['Critic']))
+        num_actor_updates = max(1, len(loss_dict['Actor']))
+
+        critic_metrics = {'Critic_Grad_Norm', 'Mean_Min_Q',
+                          'Mean_Target_Q', 'Mean_Entropy_Contribution', 'Mean_Log_Prob'}
+
         for key, value in metrics_dict.items():
-            averaged_metrics_dict[key] = value / num_updates
+            if key in critic_metrics:
+                averaged_metrics_dict[key] = value / num_critic_updates
+            else:
+                averaged_metrics_dict[key] = value / num_actor_updates
 
         info_dict = {
             'training_steps': (num_samples // self.num_envs) * max(1, self.gradient_steps),
@@ -676,6 +684,7 @@ class SAC(BaseAlgo):
         # Log Q values for monitoring
         with torch.no_grad():
             mean_min_q = torch.min(current_q_values, dim=0)[0].mean().item()
+            print(mean_min_q)
             mean_target_q = target_values.mean().item()
 
             # Log entropy contribution to target Q

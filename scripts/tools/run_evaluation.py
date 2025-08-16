@@ -50,6 +50,7 @@ def run_evaluation(
     )
     gpu_id = gpu_id_process.stdout.strip()
     logger.info(f"Using GPU ID: {gpu_id}")
+    device = f"cuda:{gpu_id}"
 
     # 3. Read motion_file path from config.yaml
     config_path = os.path.join(log_dir, "config.yaml")
@@ -82,7 +83,6 @@ def run_evaluation(
     eval_command = [
         "python", "humanoidverse/eval_offline.py",
         # NOTE (hsc): We use CUDA_VISIBLE_DEVICES to set the GPU ID
-        "+device=cuda:0",
         "+domain_rand=NO_domain_rand",  # disable domain randomization
         "+opt=my_eval_callbacks",
         f"+checkpoint={checkpoint_path}",
@@ -91,16 +91,20 @@ def run_evaluation(
         "+env.config.reset_default_no_noise=true",
     ]
     if simulator == "isaacgym":
+        eval_command.append(f"+device={device}")
         eval_command.append("+simulator=isaacgym")
         eval_command.append("+terrain=terrain_locomotion_plane")
         eval_command.append("+env.config.env_spacing=5.0")
         eval_command.append("+num_envs=1")
     elif simulator == "isaacsim":
+        eval_command.append(f"+device={device}")
         eval_command.append("+simulator=isaacsim")
         eval_command.append("+terrain=terrain_locomotion_plane")
         eval_command.append("+env.config.env_spacing=5.0")
         eval_command.append("+num_envs=1")
     elif simulator == "genesis":
+        # NOTE (hsc): Genesis和Isaac有一些玄妙的区别，我们对Genesis还是用CUDA_VISIBLE_DEVICES来设置GPU ID
+        eval_command.append("+device=cuda:0")
         eval_command.append("+simulator=genesis")
         eval_command.append("+terrain=terrain_locomotion_plane")
         eval_command.append("+env.config.env_spacing=5.0")
@@ -126,7 +130,8 @@ def run_evaluation(
     # Set environment variable for Hydra full error reporting
     env = os.environ.copy()
     env["HYDRA_FULL_ERROR"] = "1"
-    env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    if simulator == "genesis":
+        env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     subprocess.run(eval_command, check=True, env=env)
     logger.info("Offline evaluation complete.")
 

@@ -46,8 +46,8 @@ class IsaacGym(BaseSimulator):
 
         self.graphics_device_id = self.sim_device_id
         # NOTE (hsc): offline rendering still needs a graphics device id
-        # if self.headless:
-        #     self.graphics_device_id = -1
+        if self.headless:
+            self.graphics_device_id = -1
 
         sim = self.gym.create_sim(
             self.sim_device_id,

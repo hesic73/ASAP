@@ -53,6 +53,8 @@ env:
     use_teleop_control: False
     enforce_randomize_motion_start_eval: False
 
+    no_resample_motion_start_time: False
+
 eval_overrides:
   env:
     config: 

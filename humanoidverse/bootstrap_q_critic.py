@@ -132,6 +132,7 @@ def main(config: OmegaConf):
 
     # NOTE (hsc): freeze actor by default
     if config.get("freeze_actor", True):
+        logger.info("Freezing actor network")
         algo.freeze_actor()
 
     try:
