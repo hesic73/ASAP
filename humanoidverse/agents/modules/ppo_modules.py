@@ -17,6 +17,7 @@ class PPOActor(nn.Module):
                  module_config_dict: Dict[str, Any],
                  num_actions: int,
                  init_noise_std: float,
+                 fixed_std: float,
                  # as in torchrl
                  tanh_loc: bool = False,
                  up_scale: float = 5.0,
@@ -31,6 +32,10 @@ class PPOActor(nn.Module):
         # Action noise
         self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
         self.distribution = None
+
+        self.fixed_std = fixed_std
+        if fixed_std:
+            self.std.requires_grad = False
 
         self.tanh_loc = tanh_loc
         self.up_scale = up_scale

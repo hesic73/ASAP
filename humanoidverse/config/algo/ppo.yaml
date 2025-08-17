@@ -34,6 +34,7 @@ algo:
 
     # actor config
     tanh_loc: False
+    fixed_std: false
     up_scale: 5.0
 
     # Actor type selection - can be: PPOActor, PPOLogStdActor, PPOActorTanh, PPOActorFixSigma
@@ -43,6 +44,7 @@ algo:
       module_config_dict: ${algo.config.module_dict.actor}
       num_actions: ${env.config.robot.actions_dim}
       init_noise_std: ${algo.config.init_noise_std}
+      fixed_std: ${algo.config.fixed_std}
       tanh_loc: ${algo.config.tanh_loc}
       up_scale: ${algo.config.up_scale}
 

@@ -121,9 +121,10 @@ def main(config: OmegaConf):
                base_path=experiment_save_dir)
 
     from humanoidverse.agents.sac.sac import SAC
-    algo: SAC = instantiate(
+    from humanoidverse.agents.ppo.ppo import PPO
+    algo = instantiate(
         device=device, env=env, config=config.algo, log_dir=experiment_save_dir)
-    assert isinstance(algo, SAC), "Only SAC is supported"
+    assert isinstance(algo, (SAC, PPO)), "Only SAC and PPO are supported"
 
     algo.setup()
     # import ipdb;    ipdb.set_trace()

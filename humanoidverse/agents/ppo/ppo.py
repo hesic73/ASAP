@@ -62,6 +62,10 @@ class PPO(BaseAlgo):
 
         self.eval_callbacks: list[RL_EvalCallback] = []
         self.episode_env_tensors = TensorAverageMeterDict()
+
+        # Actor freezing flag
+        self.actor_frozen = False
+
         _ = self.env.reset_all()
 
     def _init_config(self):
@@ -193,6 +197,24 @@ class PPO(BaseAlgo):
         self.actor.train()
         self.critic.train()
 
+    def freeze_actor(self):
+        """Freeze actor parameters to prevent updates during training."""
+        logger.info(
+            "Freezing actor parameters - only critic will be updated during training")
+        self.actor_frozen = True
+        # Freeze all actor parameters
+        for param in self.actor.parameters():
+            param.requires_grad = False
+
+    def unfreeze_actor(self):
+        """Unfreeze actor parameters to resume normal training."""
+        logger.info(
+            "Unfreezing actor parameters - resuming normal actor-critic training")
+        self.actor_frozen = False
+        # Unfreeze all actor parameters
+        for param in self.actor.parameters():
+            param.requires_grad = True
+
     def load(self, ckpt_path):
         # import ipdb; ipdb.set_trace()
         if ckpt_path is not None:
@@ -227,6 +249,29 @@ class PPO(BaseAlgo):
             'iter': self.current_learning_iteration,
             'infos': infos,
         }, path)
+
+    def load_actor_only(self, ckpt_path: str):
+        """Load only the actor from a checkpoint, useful for fine-tuning or transfer learning."""
+        logger.info(f"Loading actor checkpoint from {ckpt_path}")
+        loaded_dict = torch.load(
+            ckpt_path, weights_only=True, map_location=self.device)
+
+        # Load actor state dict
+        self.actor.load_state_dict(loaded_dict["actor_model_state_dict"])
+
+        # Load actor optimizer if it exists
+        if "actor_optimizer_state_dict" in loaded_dict:
+            self.actor_optimizer.load_state_dict(
+                loaded_dict["actor_optimizer_state_dict"])
+            # Update learning rate from loaded optimizer
+            self.actor_learning_rate = loaded_dict['actor_optimizer_state_dict']['param_groups'][0]['lr']
+            logger.info(
+                f"Actor optimizer loaded with learning rate: {self.actor_learning_rate}")
+        else:
+            logger.warning(
+                "Actor optimizer state not found in checkpoint, keeping current optimizer state")
+
+        logger.info("Actor checkpoint loaded successfully")
 
     def learn(self):
         if self.init_at_random_ep_len:
@@ -277,6 +322,79 @@ class PPO(BaseAlgo):
         self.current_learning_iteration += num_learning_iterations
         self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(
             self.current_learning_iteration)))
+
+    def rollout(self, num_iterations: int):
+        """
+        Perform rollout to collect episodes data without training.
+
+        Args:
+            num_iterations: Number of iterations to collect, each iteration collects num_steps_per_env steps
+        """
+        obs_dict = self.env.reset_all()
+        for obs_key in obs_dict.keys():
+            obs_dict[obs_key] = obs_dict[obs_key].to(self.device)
+
+        self._eval_mode()  # Set to evaluation mode for rollout
+
+        # Clear previous episode data
+        self.ep_infos.clear()
+        self.rewbuffer.clear()
+        self.lenbuffer.clear()
+
+        # Reset episode tracking
+        self.cur_reward_sum = torch.zeros(
+            self.env.num_envs, dtype=torch.float, device=self.device)
+        self.cur_episode_length = torch.zeros(
+            self.env.num_envs, dtype=torch.float, device=self.device)
+
+        logger.info(f"Starting rollout for {num_iterations} iterations")
+
+        for iteration in range(num_iterations):
+            # Collect num_steps_per_env steps (like _rollout_step but no training)
+            obs_dict = self._collect_rollout_experience(obs_dict)
+
+            # Log after each iteration
+            self._post_rollout_logging(iteration + 1)
+
+    def _collect_rollout_experience(self, obs_dict):
+        """Collect rollout experience without training."""
+        with torch.inference_mode():
+            for i in range(self.num_steps_per_env):
+                # Compute the actions
+                policy_state_dict = {}
+                policy_state_dict = self._actor_rollout_step(
+                    obs_dict, policy_state_dict)
+
+                # Step environment
+                actor_state = {"actions": policy_state_dict["actions"]}
+                obs_dict, rewards, dones, infos = self.env.step(actor_state)
+
+                # Move to device
+                for obs_key in obs_dict.keys():
+                    obs_dict[obs_key] = obs_dict[obs_key].to(self.device)
+                rewards, dones = rewards.to(self.device), dones.to(self.device)
+
+                # Update episode tracking
+                self.episode_env_tensors.add(infos["to_log"])
+
+                if self.log_dir is not None:
+                    # Book keeping
+                    if 'episode' in infos:
+                        self.ep_infos.append(infos['episode'])
+                    self.cur_reward_sum += rewards
+                    self.cur_episode_length += 1
+                    new_ids = (dones > 0).nonzero(as_tuple=False)
+                    self.rewbuffer.extend(
+                        self.cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                    self.lenbuffer.extend(
+                        self.cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
+                    self.cur_reward_sum[new_ids] = 0
+                    self.cur_episode_length[new_ids] = 0
+
+                # Process environment step
+                self._process_env_step(rewards, dones, infos)
+
+        return obs_dict
 
     def _actor_rollout_step(self, obs_dict, policy_state_dict):
         actions = self._actor_act_step(obs_dict)
@@ -536,19 +654,19 @@ class PPO(BaseAlgo):
 
         critic_loss = self.value_loss_coef * value_loss
 
-        self.actor_optimizer.zero_grad()
+        # Always update critic
         self.critic_optimizer.zero_grad()
-
-        # print("skip backward")
-        actor_loss.backward()
         critic_loss.backward()
-
-        # Gradient step
-        nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
         nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
-
-        self.actor_optimizer.step()
         self.critic_optimizer.step()
+
+        # Only update actor if not frozen
+        if not self.actor_frozen:
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            nn.utils.clip_grad_norm_(
+                self.actor.parameters(), self.max_grad_norm)
+            self.actor_optimizer.step()
 
         # Create metrics dict for non-loss metrics
         metrics_dict = {}
@@ -710,6 +828,90 @@ class PPO(BaseAlgo):
             for metric_key, metric_value in log_dict['metrics_dict'].items():
                 self.writer.add_scalar(
                     f'Metrics/{metric_key}', metric_value, log_dict['it'])
+
+    def _post_rollout_logging(self, iteration: int, width=80, pad=35):
+        """Logging method specifically for rollout results."""
+        # Environment metrics
+        env_log_dict = self.episode_env_tensors.mean_and_clear()
+        env_log_dict = {f"Env/{k}": v for k, v in env_log_dict.items()}
+
+        # Log to TensorBoard
+        self._logging_rollout_to_writer(iteration, env_log_dict)
+
+        # Create console output
+        str_header = f" \033[1m PPO Rollout Iteration {iteration} \033[0m "
+
+        if len(self.rewbuffer) > 0:
+            log_string = (f"""{str_header.center(width, ' ')}\n\n"""
+                          f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
+                          f"""{'Mean reward:':>{pad}} {statistics.mean(self.rewbuffer):.2f}\n"""
+                          f"""{'Mean episode length:':>{pad}} {statistics.mean(self.lenbuffer):.2f}\n""")
+        else:
+            log_string = (f"""{str_header.center(width, ' ')}\n\n"""
+                          f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n""")
+
+        # Add environment metrics
+        env_log_string = ""
+        for k, v in env_log_dict.items():
+            entry = f"{f'{k}:':>{pad}} {v:.4f}"
+            env_log_string += f"{entry}\n"
+        log_string += env_log_string
+
+        # Add episode info
+        ep_string = ''
+        if self.ep_infos:
+            for key in self.ep_infos[0]:
+                infotensor = torch.tensor([], device=self.device)
+                for ep_info in self.ep_infos:
+                    # handle scalar and zero dimensional tensor infos
+                    if not isinstance(ep_info[key], torch.Tensor):
+                        ep_info[key] = torch.Tensor([ep_info[key]])
+                    if len(ep_info[key].shape) == 0:
+                        ep_info[key] = ep_info[key].unsqueeze(0)
+                    infotensor = torch.cat(
+                        (infotensor, ep_info[key].to(self.device)))
+                value = torch.mean(infotensor)
+                ep_string += f"""{f'Mean episode {key}:':>{pad}}
+                    {value:.4f}\n"""
+        log_string += ep_string
+
+        log_string += (f"""{'-' * width}\n"""
+                       f"""{'Iteration completed:':>{pad}} {iteration}\n""")
+
+        console.print(
+            Panel(log_string, title="[bold green]PPO Rollout Log", border_style="green"))
+
+    def _logging_rollout_to_writer(self, iteration: int, env_log_dict: dict):
+        """Log rollout results to TensorBoard."""
+        # Log episode rewards and lengths
+        if len(self.rewbuffer) > 0:
+            self.writer.add_scalar(
+                'Rollout/mean_reward', statistics.mean(self.rewbuffer), iteration)
+            self.writer.add_scalar(
+                'Rollout/mean_episode_length', statistics.mean(self.lenbuffer), iteration)
+
+        # Log total timesteps
+        self.writer.add_scalar('Rollout/total_timesteps',
+                               self.tot_timesteps, iteration)
+
+        # Log environment metrics
+        if len(env_log_dict) > 0:
+            for k, v in env_log_dict.items():
+                self.writer.add_scalar(k, v, iteration)
+
+        # Log episode info
+        if self.ep_infos:
+            for key in self.ep_infos[0]:
+                infotensor = torch.tensor([], device=self.device)
+                for ep_info in self.ep_infos:
+                    if not isinstance(ep_info[key], torch.Tensor):
+                        ep_info[key] = torch.Tensor([ep_info[key]])
+                    if len(ep_info[key].shape) == 0:
+                        ep_info[key] = ep_info[key].unsqueeze(0)
+                    infotensor = torch.cat(
+                        (infotensor, ep_info[key].to(self.device)))
+                value = torch.mean(infotensor)
+                self.writer.add_scalar(f'Episode/{key}', value, iteration)
 
     ##########################################################################################
     # Code for Evaluation
