@@ -17,7 +17,7 @@ class PPOActor(nn.Module):
                  module_config_dict: Dict[str, Any],
                  num_actions: int,
                  init_noise_std: float,
-                 fixed_std: float,
+                 fixed_std: float = False,
                  # as in torchrl
                  tanh_loc: bool = False,
                  up_scale: float = 5.0,
