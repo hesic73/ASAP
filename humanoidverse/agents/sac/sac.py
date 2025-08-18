@@ -69,7 +69,6 @@ class SAC(BaseAlgo):
 
         # Training parameters
         self.samples_per_iter = self.config.samples_per_iter
-        self.policy_frequency = self.config.policy_frequency
         self.gradient_steps = self.config.gradient_steps
         self.actor_max_grad_norm = self.config.actor_max_grad_norm
         self.critic_max_grad_norm = self.config.critic_max_grad_norm
@@ -551,39 +550,36 @@ class SAC(BaseAlgo):
             metrics_dict['Mean_Entropy_Contribution'] += critic_result['mean_entropy_contribution']
             metrics_dict['Mean_Log_Prob'] += critic_result['mean_log_prob']
 
-            # Update actor and alpha with policy frequency (delayed updates)
-            # Skip actor updates if actor is frozen
-            if not self.actor_frozen and self.updates % self.policy_frequency == 0:
-                # Compensate for delay by doing policy_frequency updates
-                for _ in range(self.policy_frequency):
-                    actor_result = self._update_actor_and_alpha_step()
-                    loss_dict['Actor'].append(actor_result['actor_loss'])
-                    loss_dict['Alpha'].append(actor_result['alpha_loss'])
-                    loss_dict['Action_Bound'].append(
-                        actor_result['action_bound_loss'])
-                    loss_dict['KL_Divergence'].append(
-                        actor_result['kl_loss'])
+            # Update actor and alpha
+            if not self.actor_frozen:
+                actor_result = self._update_actor_and_alpha_step()
+                loss_dict['Actor'].append(actor_result['actor_loss'])
+                loss_dict['Alpha'].append(actor_result['alpha_loss'])
+                loss_dict['Action_Bound'].append(
+                    actor_result['action_bound_loss'])
+                loss_dict['KL_Divergence'].append(
+                    actor_result['kl_loss'])
 
-                    # Log actor loss components
-                    if 'Actor_Entropy_Term' not in loss_dict:
-                        loss_dict['Actor_Entropy_Term'] = []
-                    if 'Actor_Q_Term' not in loss_dict:
-                        loss_dict['Actor_Q_Term'] = []
-                    loss_dict['Actor_Entropy_Term'].append(
-                        actor_result['entropy_term'])
-                    loss_dict['Actor_Q_Term'].append(
-                        actor_result['q_term'])
+                # Log actor loss components
+                if 'Actor_Entropy_Term' not in loss_dict:
+                    loss_dict['Actor_Entropy_Term'] = []
+                if 'Actor_Q_Term' not in loss_dict:
+                    loss_dict['Actor_Q_Term'] = []
+                loss_dict['Actor_Entropy_Term'].append(
+                    actor_result['entropy_term'])
+                loss_dict['Actor_Q_Term'].append(
+                    actor_result['q_term'])
 
-                    # Add actor grad norm to metrics
-                    if 'Actor_Grad_Norm' not in metrics_dict:
-                        metrics_dict['Actor_Grad_Norm'] = 0
-                    metrics_dict['Actor_Grad_Norm'] += actor_result['actor_grad_norm']
+                # Add actor grad norm to metrics
+                if 'Actor_Grad_Norm' not in metrics_dict:
+                    metrics_dict['Actor_Grad_Norm'] = 0
+                metrics_dict['Actor_Grad_Norm'] += actor_result['actor_grad_norm']
 
-                    # Accumulate metrics
-                    for key, value in actor_result['metrics_dict'].items():
-                        if key not in metrics_dict:
-                            metrics_dict[key] = 0
-                        metrics_dict[key] += value
+                # Accumulate metrics
+                for key, value in actor_result['metrics_dict'].items():
+                    if key not in metrics_dict:
+                        metrics_dict[key] = 0
+                    metrics_dict[key] += value
 
             # Update target networks
             if self.updates % self.target_update_frequency == 0:
