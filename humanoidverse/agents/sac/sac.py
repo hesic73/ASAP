@@ -242,6 +242,15 @@ class SAC(BaseAlgo):
         logger.info(
             f"BC loss weight: {self.bc_loss_weight}, BC loss type: {self.bc_loss_type}")
 
+        # Actor freeze control for transfer learning
+        self.freeze_actor_until_iteration = self.config.freeze_actor_until_iteration
+        logger.info(
+            f"Actor freeze until iteration: {self.freeze_actor_until_iteration}")
+
+        # Auto-load reference actor if path is provided
+        if self.config.reference_actor_path is not None:
+            self.set_reference_actor(self.config.reference_actor_path)
+
     def _get_action_scaling(self):
         qpos_limits, _, _ = self.env.simulator.get_dof_limits_properties()
         qpos_limits = qpos_limits.cpu()  # (num_dof, 2)
@@ -344,6 +353,28 @@ class SAC(BaseAlgo):
                 (1.0 - self.tau) * target_param.data + self.tau * param.data
             )
 
+    def _handle_actor_freeze_control(self, iteration: int):
+        """Handle actor freeze control based on iteration number."""
+        # Check if we should freeze actor
+        should_freeze = (self.freeze_actor_until_iteration >= 0 and
+                         iteration < self.freeze_actor_until_iteration)
+
+        # Check if we should unfreeze actor (transition from frozen to unfrozen)
+        should_unfreeze = (self.freeze_actor_until_iteration >= 0 and
+                           iteration == self.freeze_actor_until_iteration)
+
+        if should_freeze and not self.actor_frozen:
+            # Freeze actor using existing method
+            self.freeze_actor()
+            logger.info(
+                f"Iteration {iteration}: Actor frozen for critic warmup")
+
+        elif should_unfreeze and self.actor_frozen:
+            # Unfreeze actor using existing method
+            self.unfreeze_actor()
+            logger.info(
+                f"Iteration {iteration}: Actor unfrozen, resuming normal training")
+
     def learn(self):
         obs_dict = self.env.reset_all()
         obs_dict = _dict_to_device(obs_dict, self.device)
@@ -358,6 +389,9 @@ class SAC(BaseAlgo):
             self.current_learning_iteration + self.num_learning_iterations,
         ):
             self.start_time = time.time()
+
+            # Handle actor freeze control for transfer learning
+            self._handle_actor_freeze_control(iteration)
 
             # Collect samples_per_iter samples with online training
             obs_dict, loss_dict, info_dict = self._collect_and_train_online(
@@ -950,27 +984,6 @@ class SAC(BaseAlgo):
         self.total_steps = loaded_dict["total_steps"]
         self.updates = loaded_dict["updates"]
 
-        # Set reference actor for regularization (KL divergence and BC loss)
-        if self.kl_divergence_weight > 0 or self.bc_loss_weight > 0:
-            self.reference_actor = SACActor(
-                obs_dim_dict=self.algo_obs_dim_dict,
-                module_config_dict=self.config.module_dict.actor,
-                num_actions=self.num_actions,
-                init_noise_std=self.config.init_noise_std,
-                fixed_std=self.config.fixed_std,
-                tanh_loc=self.config.tanh_loc,
-                up_scale=self.config.up_scale,
-            ).to(self.device)
-            self.reference_actor.load_state_dict(self.actor.state_dict())
-            self.reference_actor.eval()  # Set to eval mode and freeze
-            for param in self.reference_actor.parameters():
-                param.requires_grad = False
-            logger.info(
-                "Reference actor set for regularization (KL divergence and BC loss)")
-        else:
-            logger.info(
-                "No regularization weights > 0, reference actor not set")
-
         logger.info("Checkpoint loaded successfully")
 
     def load_actor_only(self, ckpt_path: str):
@@ -989,27 +1002,6 @@ class SAC(BaseAlgo):
             self.target_actor.load_state_dict(self.actor.state_dict())
         self.actor_optimizer.load_state_dict(
             loaded_dict["actor_optimizer_state_dict"])
-
-        # Set reference actor for regularization (KL divergence and BC loss)
-        if self.kl_divergence_weight > 0 or self.bc_loss_weight > 0:
-            self.reference_actor = SACActor(
-                obs_dim_dict=self.algo_obs_dim_dict,
-                module_config_dict=self.config.module_dict.actor,
-                num_actions=self.num_actions,
-                init_noise_std=self.config.init_noise_std,
-                fixed_std=self.config.fixed_std,
-                tanh_loc=self.config.tanh_loc,
-                up_scale=self.config.up_scale,
-            ).to(self.device)
-            self.reference_actor.load_state_dict(self.actor.state_dict())
-            self.reference_actor.eval()  # Set to eval mode and freeze
-            for param in self.reference_actor.parameters():
-                param.requires_grad = False
-            logger.info(
-                "Reference actor set for regularization (KL divergence and BC loss)")
-        else:
-            logger.info(
-                "No regularization weights > 0, reference actor not set")
 
         logger.info("Actor checkpoint loaded successfully")
 
