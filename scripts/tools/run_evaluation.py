@@ -97,13 +97,14 @@ def run_evaluation(
         eval_command.append("+env.config.env_spacing=5.0")
         eval_command.append("+num_envs=1")
     elif simulator == "isaacsim":
-        eval_command.append(f"+device={device}")
+        # NOTE (hsc): 用CUDA_VISIBLE_DEVICES来设置GPU ID
+        eval_command.append("+device=cuda:0")
         eval_command.append("+simulator=isaacsim")
         eval_command.append("+terrain=terrain_locomotion_plane")
         eval_command.append("+env.config.env_spacing=5.0")
         eval_command.append("+num_envs=1")
     elif simulator == "genesis":
-        # NOTE (hsc): Genesis和Isaac有一些玄妙的区别，我们对Genesis还是用CUDA_VISIBLE_DEVICES来设置GPU ID
+        # NOTE (hsc): 用CUDA_VISIBLE_DEVICES来设置GPU ID
         eval_command.append("+device=cuda:0")
         eval_command.append("+simulator=genesis")
         eval_command.append("+terrain=terrain_locomotion_plane")
@@ -130,7 +131,7 @@ def run_evaluation(
     # Set environment variable for Hydra full error reporting
     env = os.environ.copy()
     env["HYDRA_FULL_ERROR"] = "1"
-    if simulator == "genesis":
+    if simulator in ['isaacsim', "genesis"]:
         env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     subprocess.run(eval_command, check=True, env=env)
     logger.info("Offline evaluation complete.")
