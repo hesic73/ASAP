@@ -25,7 +25,11 @@ algo:
     action_bound_loss_weight: 0.0
     
     # KL divergence regularization (relative to base policy from checkpoint)
-    kl_divergence_weight: 1.0
+    kl_divergence_weight: 0.0
+    
+    # BC loss regularization (relative to expert demonstrations)
+    bc_loss_weight: 0.0  # Set to positive value to enable BC loss
+    bc_loss_type: "mse"  # "mse" for mean squared error, "mae" for mean absolute error
     
     # Entropy regularization
     autotune_alpha: false  # Set to true for automatic alpha tuning
