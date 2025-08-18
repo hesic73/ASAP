@@ -61,4 +61,4 @@ AMASS/*
 *.stl
 *.sh
 !/scripts/bash/find_gpu.sh
-
+!/scripts/bash/cleanup.sh
