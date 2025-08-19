@@ -73,6 +73,13 @@ class SAC(BaseAlgo):
         self.actor_max_grad_norm = self.config.actor_max_grad_norm
         self.critic_max_grad_norm = self.config.critic_max_grad_norm
 
+        # Training loop mode: 'unified' (original paper) or 'separated' (separate critic/actor loops)
+        self.training_loop_mode = self.config.training_loop_mode
+        if self.training_loop_mode not in ['unified', 'separated']:
+            raise ValueError(
+                f"Invalid training_loop_mode: {self.training_loop_mode}. Must be 'unified' or 'separated'.")
+        logger.info(f"Using {self.training_loop_mode} training loop mode")
+
         self.replay_buffer_on_device = self.config.replay_buffer_on_device
 
         # Learning rates
@@ -611,69 +618,11 @@ class SAC(BaseAlgo):
         # Train (we already collected initial samples in setup)
         train_start = time.time()
 
-        # Perform gradient_steps updates per env step
-        for _ in range(self.gradient_steps):
-            # Update critics every update
-            critic_result = self._update_critics_step()
-            loss_dict['Critic'].append(critic_result['critic_loss'])
-
-            # Add critic metrics to metrics_dict
-            if 'Critic_Grad_Norm' not in metrics_dict:
-                metrics_dict['Critic_Grad_Norm'] = 0
-            if 'Mean_Min_Q' not in metrics_dict:
-                metrics_dict['Mean_Min_Q'] = 0
-            if 'Mean_Target_Q' not in metrics_dict:
-                metrics_dict['Mean_Target_Q'] = 0
-            if 'Mean_Entropy_Contribution' not in metrics_dict:
-                metrics_dict['Mean_Entropy_Contribution'] = 0
-            if 'Mean_Log_Prob' not in metrics_dict:
-                metrics_dict['Mean_Log_Prob'] = 0
-
-            metrics_dict['Critic_Grad_Norm'] += critic_result['critic_grad_norm']
-            metrics_dict['Mean_Min_Q'] += critic_result['mean_min_q']
-            metrics_dict['Mean_Target_Q'] += critic_result['mean_target_q']
-            metrics_dict['Mean_Entropy_Contribution'] += critic_result['mean_entropy_contribution']
-            metrics_dict['Mean_Log_Prob'] += critic_result['mean_log_prob']
-
-            # Update actor and alpha
-            if not self.actor_frozen:
-                actor_result = self._update_actor_and_alpha_step()
-                loss_dict['Actor'].append(actor_result['actor_loss'])
-                loss_dict['Alpha'].append(actor_result['alpha_loss'])
-                loss_dict['Action_Bound'].append(
-                    actor_result['action_bound_loss'])
-                loss_dict['KL_Divergence'].append(
-                    actor_result['kl_loss'])
-                loss_dict['BC_Loss'].append(
-                    actor_result['bc_loss'])
-
-                # Log actor loss components
-                if 'Actor_Entropy_Term' not in loss_dict:
-                    loss_dict['Actor_Entropy_Term'] = []
-                if 'Actor_Q_Term' not in loss_dict:
-                    loss_dict['Actor_Q_Term'] = []
-                loss_dict['Actor_Entropy_Term'].append(
-                    actor_result['entropy_term'])
-                loss_dict['Actor_Q_Term'].append(
-                    actor_result['q_term'])
-
-                # Add actor grad norm to metrics
-                if 'Actor_Grad_Norm' not in metrics_dict:
-                    metrics_dict['Actor_Grad_Norm'] = 0
-                metrics_dict['Actor_Grad_Norm'] += actor_result['actor_grad_norm']
-
-                # Accumulate metrics
-                for key, value in actor_result['metrics_dict'].items():
-                    if key not in metrics_dict:
-                        metrics_dict[key] = 0
-                    metrics_dict[key] += value
-
-            # Update target networks
-            if self.updates % self.target_update_frequency == 0:
-                self.critic.soft_update_targets()
-                self._soft_update_target_actor()
-
-            self.updates += 1
+        # Choose training loop approach based on configuration
+        if self.training_loop_mode == 'unified':
+            self._unified_training_loop(loss_dict, metrics_dict)
+        else:  # separated
+            self._separated_training_loop(loss_dict, metrics_dict)
 
         training_time += time.time() - train_start
 
@@ -903,6 +852,150 @@ class SAC(BaseAlgo):
             }
 
         return result_dict
+
+    def _unified_training_loop(self, loss_dict, metrics_dict):
+        """
+        Unified training loop (original SAC paper approach).
+        Updates critics and actors in the same loop with target network updates based on frequency.
+        """
+        # Perform gradient_steps updates per env step
+        for _ in range(self.gradient_steps):
+            # Update critics every update
+            critic_result = self._update_critics_step()
+            loss_dict['Critic'].append(critic_result['critic_loss'])
+
+            # Add critic metrics to metrics_dict
+            if 'Critic_Grad_Norm' not in metrics_dict:
+                metrics_dict['Critic_Grad_Norm'] = 0
+            if 'Mean_Min_Q' not in metrics_dict:
+                metrics_dict['Mean_Min_Q'] = 0
+            if 'Mean_Target_Q' not in metrics_dict:
+                metrics_dict['Mean_Target_Q'] = 0
+            if 'Mean_Entropy_Contribution' not in metrics_dict:
+                metrics_dict['Mean_Entropy_Contribution'] = 0
+            if 'Mean_Log_Prob' not in metrics_dict:
+                metrics_dict['Mean_Log_Prob'] = 0
+
+            metrics_dict['Critic_Grad_Norm'] += critic_result['critic_grad_norm']
+            metrics_dict['Mean_Min_Q'] += critic_result['mean_min_q']
+            metrics_dict['Mean_Target_Q'] += critic_result['mean_target_q']
+            metrics_dict['Mean_Entropy_Contribution'] += critic_result['mean_entropy_contribution']
+            metrics_dict['Mean_Log_Prob'] += critic_result['mean_log_prob']
+
+            # Update actor and alpha
+            if not self.actor_frozen:
+                actor_result = self._update_actor_and_alpha_step()
+                loss_dict['Actor'].append(actor_result['actor_loss'])
+                loss_dict['Alpha'].append(actor_result['alpha_loss'])
+                loss_dict['Action_Bound'].append(
+                    actor_result['action_bound_loss'])
+                loss_dict['KL_Divergence'].append(
+                    actor_result['kl_loss'])
+                loss_dict['BC_Loss'].append(
+                    actor_result['bc_loss'])
+
+                # Log actor loss components
+                if 'Actor_Entropy_Term' not in loss_dict:
+                    loss_dict['Actor_Entropy_Term'] = []
+                if 'Actor_Q_Term' not in loss_dict:
+                    loss_dict['Actor_Q_Term'] = []
+                loss_dict['Actor_Entropy_Term'].append(
+                    actor_result['entropy_term'])
+                loss_dict['Actor_Q_Term'].append(
+                    actor_result['q_term'])
+
+                # Add actor grad norm to metrics
+                if 'Actor_Grad_Norm' not in metrics_dict:
+                    metrics_dict['Actor_Grad_Norm'] = 0
+                metrics_dict['Actor_Grad_Norm'] += actor_result['actor_grad_norm']
+
+                # Accumulate metrics
+                for key, value in actor_result['metrics_dict'].items():
+                    if key not in metrics_dict:
+                        metrics_dict[key] = 0
+                    metrics_dict[key] += value
+
+            # Update target networks
+            if self.updates % self.target_update_frequency == 0:
+                self.critic.soft_update_targets()
+                self._soft_update_target_actor()
+
+            self.updates += 1
+
+    def _separated_training_loop(self, loss_dict, metrics_dict):
+        """
+        Separated training loop approach.
+        Updates critics first, then actors, with separate target network updates.
+        """
+        # First loop: Update critics and critic targets
+        for _ in range(self.gradient_steps):
+            # Update critics every update
+            critic_result = self._update_critics_step()
+            loss_dict['Critic'].append(critic_result['critic_loss'])
+
+            # Add critic metrics to metrics_dict
+            if 'Critic_Grad_Norm' not in metrics_dict:
+                metrics_dict['Critic_Grad_Norm'] = 0
+            if 'Mean_Min_Q' not in metrics_dict:
+                metrics_dict['Mean_Min_Q'] = 0
+            if 'Mean_Target_Q' not in metrics_dict:
+                metrics_dict['Mean_Target_Q'] = 0
+            if 'Mean_Entropy_Contribution' not in metrics_dict:
+                metrics_dict['Mean_Entropy_Contribution'] = 0
+            if 'Mean_Log_Prob' not in metrics_dict:
+                metrics_dict['Mean_Log_Prob'] = 0
+
+            metrics_dict['Critic_Grad_Norm'] += critic_result['critic_grad_norm']
+            metrics_dict['Mean_Min_Q'] += critic_result['mean_min_q']
+            metrics_dict['Mean_Target_Q'] += critic_result['mean_target_q']
+            metrics_dict['Mean_Entropy_Contribution'] += critic_result['mean_entropy_contribution']
+            metrics_dict['Mean_Log_Prob'] += critic_result['mean_log_prob']
+
+            # Update critic targets
+            if self.updates % self.target_update_frequency == 0:
+                self.critic.soft_update_targets()
+
+            self.updates += 1
+
+        # Second loop: Update actors and actor targets
+        if not self.actor_frozen:
+            for _ in range(self.gradient_steps):
+                actor_result = self._update_actor_and_alpha_step()
+                loss_dict['Actor'].append(actor_result['actor_loss'])
+                loss_dict['Alpha'].append(actor_result['alpha_loss'])
+                loss_dict['Action_Bound'].append(
+                    actor_result['action_bound_loss'])
+                loss_dict['KL_Divergence'].append(
+                    actor_result['kl_loss'])
+                loss_dict['BC_Loss'].append(
+                    actor_result['bc_loss'])
+
+                # Log actor loss components
+                if 'Actor_Entropy_Term' not in loss_dict:
+                    loss_dict['Actor_Entropy_Term'] = []
+                if 'Actor_Q_Term' not in loss_dict:
+                    loss_dict['Actor_Q_Term'] = []
+                loss_dict['Actor_Entropy_Term'].append(
+                    actor_result['entropy_term'])
+                loss_dict['Actor_Q_Term'].append(
+                    actor_result['q_term'])
+
+                # Add actor grad norm to metrics
+                if 'Actor_Grad_Norm' not in metrics_dict:
+                    metrics_dict['Actor_Grad_Norm'] = 0
+                metrics_dict['Actor_Grad_Norm'] += actor_result['actor_grad_norm']
+
+                # Accumulate metrics
+                for key, value in actor_result['metrics_dict'].items():
+                    if key not in metrics_dict:
+                        metrics_dict[key] = 0
+                    metrics_dict[key] += value
+
+                # Update actor targets (using same frequency as critic updates)
+                if (self.updates - self.gradient_steps) % self.target_update_frequency == 0:
+                    self._soft_update_target_actor()
+
+                self.updates += 1
 
     @property
     def alpha(self):

@@ -42,8 +42,9 @@ algo:
     
     # Training parameters
     samples_per_iter: 4096
-    gradient_steps: 256  # How many gradient updates after each env step
+    gradient_steps: 512  # How many gradient updates after each env step
     replay_buffer_on_device: false  # If true, place replay buffer tensors on the same device as the model (e.g., GPU)
+    training_loop_mode: "separated"  # "unified" (original SAC paper) or "separated" (separate critic/actor loops)
 
     save_interval: 1000
 
