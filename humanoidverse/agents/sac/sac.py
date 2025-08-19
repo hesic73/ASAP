@@ -480,18 +480,14 @@ class SAC(BaseAlgo):
         logger.info(
             "Freezing actor parameters - only critic will be updated during training")
         self.actor_frozen = True
-        # Freeze all actor parameters
-        for param in self.actor.parameters():
-            param.requires_grad = False
+        self.actor.freeze_actor()
 
     def unfreeze_actor(self):
         """Unfreeze actor parameters to resume normal training."""
         logger.info(
             "Unfreezing actor parameters - resuming normal actor-critic training")
         self.actor_frozen = False
-        # Unfreeze all actor parameters
-        for param in self.actor.parameters():
-            param.requires_grad = True
+        self.actor.unfreeze_actor()
 
     def set_reference_actor(self, reference_actor_path: str):
         """Set reference actor for regularization (KL divergence and BC loss)."""

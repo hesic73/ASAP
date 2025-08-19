@@ -22,6 +22,22 @@ def decode_param_name(name: str) -> str:
 
 
 class SACActor(nn.Module):
+    def freeze_actor(self):
+        # Freeze actor_module parameters
+        for param in self.actor_module.parameters():
+            param.requires_grad = False
+        # Freeze std only if not fixed
+        if not self.fixed_std:
+            self.std.requires_grad = False
+
+    def unfreeze_actor(self):
+        # Unfreeze actor_module parameters
+        for param in self.actor_module.parameters():
+            param.requires_grad = True
+        # Unfreeze std only if not fixed
+        if not self.fixed_std:
+            self.std.requires_grad = True
+
     def __init__(self,
                  obs_dim_dict: Dict[str, int],
                  module_config_dict: Dict[str, Any],
