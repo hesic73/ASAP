@@ -820,35 +820,30 @@ class SAC(BaseAlgo):
         action_bound_loss = self._action_bound_loss(self.actor.action_mean)
         actor_loss += action_bound_loss * self.action_bound_loss_weight
 
-        # Add KL divergence loss (if reference actor exists and weight > 0)
+        # Add KL divergence loss (if reference actor exists)
         kl_loss = torch.tensor(0.0, device=self.device)
-        if self.reference_actor is not None and self.kl_divergence_weight > 0:
+        if self.reference_actor is not None:
             with torch.no_grad():
-                # Get reference policy distribution for the same observations
                 self.reference_actor.update_distribution(obs["actor_obs"])
                 reference_mean = self.reference_actor.action_mean
                 reference_std = self.reference_actor.action_std
-
-            # Current policy distribution (already computed)
             current_mean = self.actor.action_mean
             current_std = self.actor.action_std
-
             kl_loss = self._kl_divergence_loss(
                 current_mean, current_std, reference_mean, reference_std)
-            actor_loss += kl_loss * self.kl_divergence_weight
+            if self.kl_divergence_weight > 0:
+                actor_loss += kl_loss * self.kl_divergence_weight
 
-        # Add BC loss (if reference actor exists and weight > 0)
+        # Add BC loss (if reference actor exists)
         bc_loss = torch.tensor(0.0, device=self.device)
-        if self.reference_actor is not None and self.bc_loss_weight > 0:
+        if self.reference_actor is not None:
             with torch.no_grad():
-                # Get reference actions for the same observations
-                reference_actions = self.reference_actor.act(obs["actor_obs"])
-
-            # Current policy actions (already computed)
-            current_actions = actions
-
+                reference_actions = self.reference_actor.act_inference(
+                    obs["actor_obs"])
+            current_actions = self.actor.act_inference(obs["actor_obs"])
             bc_loss = self._bc_loss(current_actions, reference_actions)
-            actor_loss += bc_loss * self.bc_loss_weight
+            if self.bc_loss_weight > 0:
+                actor_loss += bc_loss * self.bc_loss_weight
 
         # Log actor loss components for monitoring
         with torch.no_grad():
