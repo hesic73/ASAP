@@ -319,6 +319,17 @@ class SAC(BaseAlgo):
         Returns:
             KL divergence loss (scalar)
         """
+        kl_div_per_sample = self._kl_divergence_per_sample(
+            current_mean, current_std, base_mean, base_std)
+        return torch.mean(kl_div_per_sample)
+
+    def _kl_divergence_per_sample(self, current_mean, current_std, base_mean, base_std):
+        """
+        Compute KL divergence between two multivariate Gaussian distributions (per-sample).
+
+        Returns:
+            KL divergence per sample [batch_size]
+        """
         # Compute KL divergence components
         var_ratio = (current_std ** 2) / (base_std ** 2)  # σ_p^2 / σ_q^2
         mean_diff_sq = ((base_mean - current_mean) ** 2) / \
@@ -326,10 +337,10 @@ class SAC(BaseAlgo):
         # ln(σ_q^2 / σ_p^2)
         log_var_ratio = 2 * torch.log(base_std / current_std)
 
-        # Sum over action dimensions, then take mean over batch
+        # Sum over action dimensions, keep batch dimension
         kl_div = 0.5 * torch.sum(var_ratio +
                                  mean_diff_sq - 1 + log_var_ratio, dim=-1)
-        return torch.mean(kl_div)
+        return kl_div
 
     def _bc_loss(self, current_actions, reference_actions):
         """
@@ -342,16 +353,33 @@ class SAC(BaseAlgo):
         Returns:
             BC loss (scalar)
         """
+        bc_loss_per_sample = self._bc_loss_per_sample(
+            current_actions, reference_actions)
+        return torch.mean(bc_loss_per_sample)
+
+    def _bc_loss_per_sample(self, current_actions, reference_actions):
+        """
+        Compute BC (Behavior Cloning) loss between current policy actions and reference actions (per-sample).
+
+        Args:
+            current_actions: Actions from current policy [batch_size, action_dim]
+            reference_actions: Reference/expert actions [batch_size, action_dim]
+
+        Returns:
+            BC loss per sample [batch_size]
+        """
         if self.bc_loss_type == "mse":
             # Mean squared error loss
-            bc_loss = F.mse_loss(current_actions, reference_actions)
+            bc_loss_per_sample = torch.mean(
+                (current_actions - reference_actions) ** 2, dim=-1)
         elif self.bc_loss_type == "mae":
             # Mean absolute error loss
-            bc_loss = F.l1_loss(current_actions, reference_actions)
+            bc_loss_per_sample = torch.mean(
+                torch.abs(current_actions - reference_actions), dim=-1)
         else:
             raise ValueError(f"Unknown BC loss type: {self.bc_loss_type}")
 
-        return bc_loss
+        return bc_loss_per_sample
 
     def _soft_update_target_actor(self):
         """Soft update target actor network with moving average."""
@@ -688,6 +716,39 @@ class SAC(BaseAlgo):
                 next_obs["critic_obs"], next_actions
             )
             target_q = target_q_min - self.alpha * next_log_probs.unsqueeze(1)
+
+            # Add regularization terms to target_q (similar to entropy term)
+            if self.reference_actor is not None:
+                # KL divergence regularization term
+                if self.kl_divergence_weight > 0:
+                    self.target_actor.update_distribution(
+                        next_obs["actor_obs"])
+                    self.reference_actor.update_distribution(
+                        next_obs["actor_obs"])
+
+                    target_mean = self.target_actor.action_mean
+                    target_std = self.target_actor.action_std
+                    reference_mean = self.reference_actor.action_mean
+                    reference_std = self.reference_actor.action_std
+
+                    # Compute KL divergence for target_q (per-sample)
+                    kl_div = self._kl_divergence_per_sample(
+                        target_mean, target_std, reference_mean, reference_std)
+                    target_q = target_q - \
+                        self.kl_divergence_weight * kl_div.unsqueeze(1)
+
+                # BC regularization term
+                if self.bc_loss_weight > 0:
+                    target_actions_inference = self.target_actor.act_inference(
+                        next_obs["actor_obs"])
+                    reference_actions = self.reference_actor.act_inference(
+                        next_obs["actor_obs"])
+
+                    # Compute BC loss for target_q (per-sample)
+                    bc_loss_per_sample = self._bc_loss_per_sample(
+                        target_actions_inference, reference_actions)
+                    target_q = target_q - self.bc_loss_weight * \
+                        bc_loss_per_sample.unsqueeze(1)
 
             # Compute TD target
             target_values = rewards + self.gamma * \
