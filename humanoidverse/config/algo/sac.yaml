@@ -9,7 +9,7 @@ algo:
     batch_size: 256
     learning_starts: ${eval:'${num_envs} * 200'}
     target_update_frequency: 1
-    tau: 0.005
+    tau: 0.001
     gamma: 0.95
     
     # Critic ensemble parameters
